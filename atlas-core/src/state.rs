@@ -48,6 +48,7 @@ pub struct AtlasState {
     pub data_device_state: DataDeviceState,
     pub seat: Seat<AtlasState>,
     pub output: Output,
+    pub socket_name: String,
     pub running: bool,
 }
 

@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::time::Duration;
+
 use smithay::{
     backend::{
         input::{InputEvent, KeyboardKeyEvent},
@@ -12,19 +15,24 @@ use smithay::{
     input::keyboard::FilterResult,
     output::{Mode, Output, PhysicalProperties, Subpixel},
     reexports::{
-        calloop::EventLoop,
+        calloop::{EventLoop, Interest, Mode as LoopMode, PostAction, generic::Generic},
         wayland_server::Display,
         winit::event_loop::pump_events::PumpStatus,
     },
     utils::{Rectangle, Transform},
-    wayland::compositor::{SurfaceAttributes, TraversalAction, with_surface_tree_downward},
+    wayland::{
+        compositor::{SurfaceAttributes, TraversalAction, with_surface_tree_downward},
+        socket::ListeningSocketSource,
+    },
 };
+use tracing::{error, info, warn};
 
-use tracing::error;
+use crate::state::{AtlasState, ClientState};
 
-use crate::state::AtlasState;
-
-fn send_frames_surface_tree(surface: &smithay::reexports::wayland_server::protocol::wl_surface::WlSurface, time: u32) {
+fn send_frames_surface_tree(
+    surface: &smithay::reexports::wayland_server::protocol::wl_surface::WlSurface,
+    time: u32,
+) {
     with_surface_tree_downward(
         surface,
         (),
@@ -45,8 +53,8 @@ fn send_frames_surface_tree(surface: &smithay::reexports::wayland_server::protoc
 }
 
 pub fn run_winit() -> Result<(), Box<dyn std::error::Error>> {
-    let _event_loop: EventLoop<AtlasState> = EventLoop::try_new()?;
-    let mut display: Display<AtlasState> = Display::new()?;
+    let mut event_loop: EventLoop<AtlasState> = EventLoop::try_new()?;
+    let display: Display<AtlasState> = Display::new()?;
     let dh = display.handle();
 
     let compositor_state = smithay::wayland::compositor::CompositorState::new::<AtlasState>(&dh);
@@ -82,19 +90,48 @@ pub fn run_winit() -> Result<(), Box<dyn std::error::Error>> {
     );
     output.set_preferred(mode);
 
+    let xdg_shell_state = smithay::wayland::shell::xdg::XdgShellState::new::<AtlasState>(&dh);
+
+    let socket_source = ListeningSocketSource::new_auto()?;
+    let socket_name = socket_source.socket_name().to_string_lossy().into_owned();
+    info!(name = socket_name, "Listening on wayland socket");
+
+    event_loop.handle().insert_source(
+        socket_source,
+        |client_stream, _, data: &mut AtlasState| {
+            if let Err(err) = data
+                .display_handle
+                .insert_client(client_stream, Arc::new(ClientState::default()))
+            {
+                warn!("Error adding wayland client: {}", err);
+            }
+        },
+    )?;
+
+    event_loop.handle().insert_source(
+        Generic::new(display, Interest::READ, LoopMode::Level),
+        |_, display, data| {
+            unsafe {
+                display.get_mut().dispatch_clients(data).unwrap();
+            }
+            Ok(PostAction::Continue)
+        },
+    )?;
+
     let mut state = AtlasState {
         display_handle: dh.clone(),
         compositor_state,
-        xdg_shell_state: smithay::wayland::shell::xdg::XdgShellState::new::<AtlasState>(&dh),
+        xdg_shell_state,
         shm_state,
         seat_state,
         data_device_state,
         seat,
         output,
+        socket_name,
         running: true,
     };
 
-    tracing::info!("Initialization completed, starting the main loop.");
+    info!("Initialization completed, starting the main loop.");
 
     let keyboard = state
         .seat
@@ -196,14 +233,22 @@ pub fn run_winit() -> Result<(), Box<dyn std::error::Error>> {
                     start_time.elapsed().as_millis() as u32,
                 );
             }
-
-            display.dispatch_clients(&mut state)?;
-            display.flush_clients()?;
         }
 
         backend
             .submit(Some(&[damage]))
             .map_err(|e| format!("Submit error: {}", e))?;
+
+        let result = event_loop.dispatch(Some(Duration::from_millis(1)), &mut state);
+        if result.is_err() {
+            error!("Event loop dispatch error");
+            state.running = false;
+            break;
+        }
+
+        if let Err(err) = state.display_handle.flush_clients() {
+            warn!("Failed to flush clients: {:?}", err);
+        }
     }
 
     Ok(())

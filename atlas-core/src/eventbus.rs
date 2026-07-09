@@ -1,15 +1,8 @@
-use std::collections::HashMap;
-use std::any::Any;
-
-pub struct EventBus {
-    handlers: HashMap<&'static str, Vec<Box<dyn FnMut(&dyn Any)>>>,
-}
+pub struct EventBus;
 
 impl EventBus {
     pub fn new() -> Self {
-        EventBus {
-            handlers: HashMap::new(),
-        }
+        EventBus
     }
 
     pub fn on<F, E>(&mut self, _event_type: &str, _handler: F)
