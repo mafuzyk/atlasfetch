@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use smithay::{
     backend::renderer::damage::OutputDamageTracker,
     desktop::{Space, Window},
@@ -16,7 +18,7 @@ use smithay::{
             },
         },
     },
-    utils::Serial,
+    utils::{Point, Physical, Serial},
     wayland::{
         buffer::BufferHandler,
         compositor::{CompositorClientState, CompositorHandler, CompositorState},
@@ -30,6 +32,8 @@ use smithay::{
     },
 };
 
+use atlas_space::{GlobalSpace, Viewport, Size as GsSize, Point as GsPoint};
+
 #[derive(Default)]
 pub struct ClientState {
     pub compositor_state: CompositorClientState,
@@ -38,6 +42,24 @@ pub struct ClientState {
 impl ClientData for ClientState {
     fn initialized(&self, _client_id: ClientId) {}
     fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {}
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GrabKind {
+    Move,
+    Resize,
+}
+
+/// Tracks a window being manipulated via Mod+Click.
+pub struct GrabState {
+    pub kind: GrabKind,
+    pub window_id: u64,
+    /// Window's canvas-space position when the grab started.
+    pub initial_window_pos: GsPoint,
+    /// Canvas-space pointer position when the grab started.
+    pub grab_anchor: GsPoint,
+    /// Window's canvas-space size when the grab started (used only for resize).
+    pub initial_window_size: GsSize,
 }
 
 pub struct AtlasState {
@@ -52,7 +74,23 @@ pub struct AtlasState {
     pub socket_name: String,
     pub space: Space<Window>,
     pub damage_tracker: OutputDamageTracker,
+    pub global_space: GlobalSpace,
+    pub viewport: Viewport,
+    /// Maps global-space window ID → Smithay `Window`
+    pub windows: HashMap<u64, Window>,
     pub running: bool,
+    /// Current grab (set during Mod+Click drag/resize)
+    pub grab: Option<GrabState>,
+    /// Pointer location in physical screen pixels.
+    pub pointer_location: Point<f64, Physical>,
+    /// Whether the Mod (Super) key is held.
+    pub mod_pressed: bool,
+    /// Monotonically increasing serial for input events.
+    pub serial_counter: u32,
+    /// The global ID of the most recently focused window (for Mod+Arrow moves).
+    pub focused_gid: Option<u64>,
+    /// Last cursor image status reported by the seat.
+    pub cursor_status: CursorImageStatus,
 }
 
 impl BufferHandler for AtlasState {
@@ -66,7 +104,26 @@ impl XdgShellHandler for AtlasState {
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         let window = Window::new_wayland_window(surface);
-        self.space.map_element(window, (100, 100), true);
+        let default_win_size = GsSize::new(800.0, 600.0);
+
+        let pos = if let Some(region) = self.global_space.first_region() {
+            self.global_space
+                .position_in_region(region.id, default_win_size)
+                .unwrap_or(GsPoint::new(100.0, 100.0))
+        } else {
+            let (sw, sh) = self
+                .output
+                .current_mode()
+                .map(|m| (m.size.w, m.size.h))
+                .unwrap_or((1920i32, 1080i32));
+            self.global_space.viewport_center_position(
+                &self.viewport,
+                GsSize::new(sw as f64, sh as f64),
+            )
+        };
+
+        let gid = self.global_space.add_window(pos, default_win_size, None);
+        self.windows.insert(gid, window);
     }
 
     fn new_popup(&mut self, _surface: PopupSurface, _positioner: PositionerState) {}
@@ -127,7 +184,9 @@ impl SeatHandler for AtlasState {
 
     fn focus_changed(&mut self, _seat: &Seat<Self>, _focused: Option<&WlSurface>) {}
 
-    fn cursor_image(&mut self, _seat: &Seat<Self>, _image: CursorImageStatus) {}
+    fn cursor_image(&mut self, _seat: &Seat<Self>, image: CursorImageStatus) {
+        self.cursor_status = image;
+    }
 }
 
 smithay::delegate_dispatch2!(AtlasState);
