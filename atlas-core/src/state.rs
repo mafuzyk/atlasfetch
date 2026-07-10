@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use tracing::info;
+
 use smithay::{
     backend::renderer::damage::OutputDamageTracker,
     desktop::{Space, Window},
@@ -13,7 +15,7 @@ use smithay::{
             Client, DisplayHandle,
             backend::{ClientData, ClientId, DisconnectReason},
             protocol::{
-                wl_buffer, wl_seat,
+                wl_buffer, wl_output, wl_seat,
                 wl_surface::WlSurface,
             },
         },
@@ -27,7 +29,11 @@ use smithay::{
             SelectionHandler,
             data_device::{DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler},
         },
-        shell::xdg::{PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState},
+        shell::{
+            kde::decoration::{KdeDecorationHandler, KdeDecorationState},
+            wlr_layer::{WlrLayerShellHandler, WlrLayerShellState, LayerSurface, Layer},
+            xdg::{PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState},
+        },
         shm::{ShmHandler, ShmState},
     },
 };
@@ -50,15 +56,11 @@ pub enum GrabKind {
     Resize,
 }
 
-/// Tracks a window being manipulated via Mod+Click.
 pub struct GrabState {
     pub kind: GrabKind,
     pub window_id: u64,
-    /// Window's canvas-space position when the grab started.
     pub initial_window_pos: GsPoint,
-    /// Canvas-space pointer position when the grab started.
     pub grab_anchor: GsPoint,
-    /// Window's canvas-space size when the grab started (used only for resize).
     pub initial_window_size: GsSize,
 }
 
@@ -76,21 +78,19 @@ pub struct AtlasState {
     pub damage_tracker: OutputDamageTracker,
     pub global_space: GlobalSpace,
     pub viewport: Viewport,
-    /// Maps global-space window ID → Smithay `Window`
     pub windows: HashMap<u64, Window>,
     pub running: bool,
-    /// Current grab (set during Mod+Click drag/resize)
     pub grab: Option<GrabState>,
-    /// Pointer location in physical screen pixels.
     pub pointer_location: Point<f64, Physical>,
-    /// Whether the Mod (Super) key is held.
     pub mod_pressed: bool,
-    /// Monotonically increasing serial for input events.
     pub serial_counter: u32,
-    /// The global ID of the most recently focused window (for Mod+Arrow moves).
     pub focused_gid: Option<u64>,
-    /// Last cursor image status reported by the seat.
     pub cursor_status: CursorImageStatus,
+    // ── KDE Server-Side Decorations ───────────────────────────────
+    pub kde_decoration_state: KdeDecorationState,
+    // ── Layer Shell (wlr-layer-shell) ─────────────────────────────
+    pub layer_shell_state: WlrLayerShellState,
+    pub layer_surfaces: Vec<LayerSurface>,
 }
 
 impl BufferHandler for AtlasState {
@@ -138,6 +138,37 @@ impl XdgShellHandler for AtlasState {
     ) {
     }
 }
+
+// ── KDE Server Decoration (SSD) ─────────────────────────────────
+
+impl KdeDecorationHandler for AtlasState {
+    fn kde_decoration_state(&self) -> &KdeDecorationState {
+        &self.kde_decoration_state
+    }
+}
+
+// ── Layer Shell (wlr-layer-shell) ───────────────────────────────
+
+impl WlrLayerShellHandler for AtlasState {
+    fn shell_state(&mut self) -> &mut WlrLayerShellState {
+        &mut self.layer_shell_state
+    }
+
+    fn new_layer_surface(
+        &mut self,
+        surface: LayerSurface,
+        _output: Option<wl_output::WlOutput>,
+        layer: Layer,
+        namespace: String,
+    ) {
+        info!(namespace, layer = ?layer, "New layer surface");
+        // Send initial configure so the client commits its first buffer.
+        surface.send_configure();
+        self.layer_surfaces.push(surface);
+    }
+}
+
+// ── Selections & Output ─────────────────────────────────────────
 
 impl SelectionHandler for AtlasState {
     type SelectionUserData = ();

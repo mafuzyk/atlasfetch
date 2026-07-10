@@ -8,7 +8,10 @@ use smithay::{
             PointerButtonEvent,
         },
         renderer::{
-            element::solid::SolidColorRenderElement,
+            element::{
+                Kind,
+                solid::{SolidColorBuffer, SolidColorRenderElement},
+            },
             gles::GlesRenderer,
             Color32F,
         },
@@ -24,8 +27,9 @@ use smithay::{
         calloop::{EventLoop, Interest, Mode as LoopMode, PostAction, generic::Generic},
         wayland_server::Display,
         winit::event_loop::pump_events::PumpStatus,
+        wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration_manager::Mode as SsdMode,
     },
-    utils::{Logical, Physical, Point, Transform},
+    utils::{Logical, Physical, Point, Size, Transform},
     wayland::{
         socket::ListeningSocketSource,
     },
@@ -43,6 +47,7 @@ const KEY_Q: i32 = 16;
 const BTN_LEFT: u32 = 0x110;
 const BTN_RIGHT: u32 = 0x111;
 const MIN_WIN_SIZE: f64 = 100.0;
+const BORDER_WIDTH: f64 = 3.0;
 
 /// ── Spatial helpers ──────────────────────────────────────────────
 
@@ -104,12 +109,70 @@ fn find_gid(state: &AtlasState, window: &Window) -> Option<u64> {
     })
 }
 
+/// Build border `SolidColorRenderElement`s for every window currently
+/// mapped in the Smithay Space.
+fn build_border_elements(
+    state: &AtlasState,
+) -> Vec<SolidColorRenderElement> {
+    let mut elements = Vec::new();
+    let border = BORDER_WIDTH;
+    let focused = Color32F::new(0.4, 0.6, 1.0, 1.0);   // bright blue
+    let unfocused = Color32F::new(0.3, 0.3, 0.3, 1.0);  // dim gray
+
+    for (gid, window) in &state.windows {
+        if let Some(geo) = state.space.element_geometry(window) {
+            let color = if state.focused_gid == Some(*gid) {
+                focused
+            } else {
+                unfocused
+            };
+            let (x, y, w, h) = (
+                geo.loc.x as f64,
+                geo.loc.y as f64,
+                geo.size.w as f64,
+                geo.size.h as f64,
+            );
+
+            let bw = w + 2.0 * border;
+
+            // top
+            let mut buf = SolidColorBuffer::new((bw as i32, border as i32), color);
+            elements.push(SolidColorRenderElement::from_buffer(
+                &buf, Point::from(((x - border) as i32, (y - border) as i32)),
+                1.0, 1.0, Kind::Unspecified,
+            ));
+            // bottom
+            buf = SolidColorBuffer::new((bw as i32, border as i32), color);
+            elements.push(SolidColorRenderElement::from_buffer(
+                &buf, Point::from(((x - border) as i32, (y + h) as i32)),
+                1.0, 1.0, Kind::Unspecified,
+            ));
+            // left
+            buf = SolidColorBuffer::new((border as i32, h as i32), color);
+            elements.push(SolidColorRenderElement::from_buffer(
+                &buf, Point::from(((x - border) as i32, y as i32)),
+                1.0, 1.0, Kind::Unspecified,
+            ));
+            // right
+            buf = SolidColorBuffer::new((border as i32, h as i32), color);
+            elements.push(SolidColorRenderElement::from_buffer(
+                &buf, Point::from(((x + w) as i32, y as i32)),
+                1.0, 1.0, Kind::Unspecified,
+            ));
+        }
+    }
+    elements
+}
+
+/// Truncate dead layer surfaces from the list.
+fn prune_layer_surfaces(state: &mut AtlasState) {
+    state.layer_surfaces.retain(|s| s.alive());
+}
+
 /// ── Keyboard ─────────────────────────────────────────────────────
 
-/// Spawn a terminal emulator process.
 fn spawn_terminal() {
-    // Try a few common terminal emulators
-    for cmd in &["fish", "gnome-terminal", "alacritty", "kitty", "foot", "weston-terminal"] {
+    for cmd in &["gnome-terminal", "alacritty", "kitty", "foot", "weston-terminal"] {
         if std::process::Command::new("which")
             .arg(cmd)
             .stdout(std::process::Stdio::null())
@@ -123,7 +186,6 @@ fn spawn_terminal() {
             return;
         }
     }
-    // As last resort try the WAYLAND_DISPLAY env variable
     let _ = std::process::Command::new("xterm")
         .env("WAYLAND_DISPLAY", std::env::var("WAYLAND_DISPLAY").unwrap_or_default())
         .spawn()
@@ -142,13 +204,10 @@ fn handle_keyboard_event(
         state.mod_pressed = pressed;
     }
 
-    // ── Keybinds (only on press) ──────────────────────────────────
+    // ── Keybinds ─────────────────────────────────────────────────
     if pressed && state.mod_pressed {
         match evdev {
-            KEY_ENTER => {
-                spawn_terminal();
-                return;
-            }
+            KEY_ENTER => { spawn_terminal(); return; }
             KEY_Q => {
                 if let Some(gid) = state.focused_gid {
                     if let Some(window) = state.windows.get(&gid) {
@@ -164,7 +223,7 @@ fn handle_keyboard_event(
         }
     }
 
-    // ── Camera pan (plain arrow keys, no Mod) ─────────────────────
+    // ── Camera pan (plain arrows) ────────────────────────────────
     if pressed && !state.mod_pressed {
         match evdev {
             103 => state.viewport.y -= PAN_SPEED / state.viewport.zoom,
@@ -175,12 +234,11 @@ fn handle_keyboard_event(
         }
     }
 
-    // ── Mod+Arrow Nudge (move focused window) ─────────────────────
+    // ── Mod+Arrow nudge ──────────────────────────────────────────
     if pressed && state.mod_pressed {
         if let Some(focused_gid) = state.focused_gid {
             let step = 20.0;
-            let pos = state.global_space.window_position(focused_gid);
-            if let Some(p) = pos {
+            if let Some(p) = state.global_space.window_position(focused_gid) {
                 let new_pos = match evdev {
                     103 => GsPoint::new(p.x, p.y - step),
                     108 => GsPoint::new(p.x, p.y + step),
@@ -194,11 +252,7 @@ fn handle_keyboard_event(
     }
 
     keyboard.input::<(), _>(
-        state,
-        event.key_code(),
-        event.state(),
-        0.into(),
-        0,
+        state, event.key_code(), event.state(), 0.into(), 0,
         |_, _, _| FilterResult::Forward,
     );
 }
@@ -213,38 +267,30 @@ fn handle_motion_event(
 ) {
     state.pointer_location = phys;
 
-    // ── Active grab (move or resize) ─────────────────────────────
     let grab_update = state.grab.as_ref().map(|g| {
         let current_canvas = screen_to_canvas(state, phys);
-        let delta_x = current_canvas.x - g.grab_anchor.x;
-        let delta_y = current_canvas.y - g.grab_anchor.y;
+        let dx = current_canvas.x - g.grab_anchor.x;
+        let dy = current_canvas.y - g.grab_anchor.y;
 
         match g.kind {
-            GrabKind::Move => (
-                g.window_id,
-                g.initial_window_pos.x + delta_x,
-                g.initial_window_pos.y + delta_y,
-                None, // no size change
-            ),
+            GrabKind::Move => (g.window_id, g.initial_window_pos.x + dx, g.initial_window_pos.y + dy, None),
             GrabKind::Resize => {
-                let new_w = (g.initial_window_size.width + delta_x).max(MIN_WIN_SIZE);
-                let new_h = (g.initial_window_size.height + delta_y).max(MIN_WIN_SIZE);
-                (g.window_id, g.initial_window_pos.x, g.initial_window_pos.y, Some((new_w, new_h)))
+                let nw = (g.initial_window_size.width + dx).max(MIN_WIN_SIZE);
+                let nh = (g.initial_window_size.height + dy).max(MIN_WIN_SIZE);
+                (g.window_id, g.initial_window_pos.x, g.initial_window_pos.y, Some((nw, nh)))
             }
         }
     });
 
     if let Some((gid, nx, ny, resize_opt)) = grab_update {
         state.global_space.move_window(gid, GsPoint::new(nx, ny));
-
         if let Some((nw, nh)) = resize_opt {
             let ns = GsSize::new(nw, nh);
             state.global_space.resize_window(gid, ns);
-            // Send configure to the client so it reallocates buffers
             if let Some(window) = state.windows.get(&gid) {
                 if let Some(toplevel) = window.toplevel() {
-                    toplevel.with_pending_state(|state| {
-                        state.size = Some(smithay::utils::Size::from((nw as i32, nh as i32)));
+                    toplevel.with_pending_state(|s| {
+                        s.size = Some(Size::from((nw as i32, nh as i32)));
                     });
                     toplevel.send_configure();
                 }
@@ -252,7 +298,6 @@ fn handle_motion_event(
         }
     }
 
-    // ── Focus surface (for pointer events) ────────────────────────
     let surface = state
         .space
         .element_under(logical)
@@ -266,11 +311,7 @@ fn handle_motion_event(
     pointer.motion(
         state,
         focus,
-        &MotionEvent {
-            location: logical,
-            serial: serial.into(),
-            time: 0,
-        },
+        &MotionEvent { location: logical, serial: serial.into(), time: 0 },
     );
     pointer.frame(state);
 }
@@ -289,80 +330,48 @@ fn handle_button_event(
     let is_left = code == BTN_LEFT;
     let is_right = code == BTN_RIGHT;
 
-    // ── Press ─────────────────────────────────────────────────────
+    // ── Press (Mod+Click for drag/resize) ─────────────────────────
     if is_press && (is_left || is_right) && state.mod_pressed {
-        let logical = Point::<f64, Logical>::from((
-            state.pointer_location.x,
-            state.pointer_location.y,
-        ));
+        let logical = Point::<f64, Logical>::from((state.pointer_location.x, state.pointer_location.y));
+        let hit = state.space.element_under(logical).and_then(|(w, _)| find_gid(state, w));
 
-        let hit = state.space.element_under(logical).map(|(w, _)| {
-            let surface = surface_from_window(w);
-            let gid = find_gid(state, w);
-            (gid, surface)
-        });
+        if let Some(gid) = hit {
+            let canvas = screen_to_canvas(state, state.pointer_location);
+            let win_pos = state.global_space.window_position(gid).unwrap_or(GsPoint::new(0.0, 0.0));
+            let win_size = state.global_space.window_entry(gid).map(|e| e.size).unwrap_or(GsSize::new(800.0, 600.0));
 
-        if let Some((window_id, _)) = hit {
-            if let Some(gid) = window_id {
-                let canvas = screen_to_canvas(state, state.pointer_location);
-                let win_pos = state
-                    .global_space
-                    .window_position(gid)
-                    .unwrap_or(GsPoint::new(0.0, 0.0));
-                let win_size = state
-                    .global_space
-                    .window_entry(gid)
-                    .map(|e| e.size)
-                    .unwrap_or(GsSize::new(800.0, 600.0));
-
-                state.grab = Some(GrabState {
-                    kind: if is_left { GrabKind::Move } else { GrabKind::Resize },
-                    window_id: gid,
-                    initial_window_pos: win_pos,
-                    grab_anchor: canvas,
-                    initial_window_size: win_size,
-                });
-            }
+            state.grab = Some(GrabState {
+                kind: if is_left { GrabKind::Move } else { GrabKind::Resize },
+                window_id: gid,
+                initial_window_pos: win_pos,
+                grab_anchor: canvas,
+                initial_window_size: win_size,
+            });
         }
     }
 
-    // ── Release ───────────────────────────────────────────────────
+    // ── Release (end drag/resize) ─────────────────────────────────
     if !is_press && (is_left || is_right) {
         let grab_end = state.grab.as_ref().map(|g| {
             let current_canvas = screen_to_canvas(state, state.pointer_location);
-            let delta_x = current_canvas.x - g.grab_anchor.x;
-            let delta_y = current_canvas.y - g.grab_anchor.y;
-
+            let dx = current_canvas.x - g.grab_anchor.x;
+            let dy = current_canvas.y - g.grab_anchor.y;
             match g.kind {
-                GrabKind::Move => (
-                    g.window_id,
-                    g.initial_window_pos.x + delta_x,
-                    g.initial_window_pos.y + delta_y,
-                    None,
-                ),
+                GrabKind::Move => (g.window_id, g.initial_window_pos.x + dx, g.initial_window_pos.y + dy, None),
                 GrabKind::Resize => {
-                    let new_w = (g.initial_window_size.width + delta_x).max(MIN_WIN_SIZE);
-                    let new_h = (g.initial_window_size.height + delta_y).max(MIN_WIN_SIZE);
-                    (
-                        g.window_id,
-                        g.initial_window_pos.x,
-                        g.initial_window_pos.y,
-                        Some((new_w, new_h)),
-                    )
+                    let nw = (g.initial_window_size.width + dx).max(MIN_WIN_SIZE);
+                    let nh = (g.initial_window_size.height + dy).max(MIN_WIN_SIZE);
+                    (g.window_id, g.initial_window_pos.x, g.initial_window_pos.y, Some((nw, nh)))
                 }
             }
         });
-
         if let Some((gid, nx, ny, resize_opt)) = grab_end {
             state.global_space.move_window(gid, GsPoint::new(nx, ny));
             if let Some((nw, nh)) = resize_opt {
-                let ns = GsSize::new(nw, nh);
-                state.global_space.resize_window(gid, ns);
+                state.global_space.resize_window(gid, GsSize::new(nw, nh));
                 if let Some(window) = state.windows.get(&gid) {
                     if let Some(toplevel) = window.toplevel() {
-                        toplevel.with_pending_state(|state| {
-                            state.size = Some(smithay::utils::Size::from((nw as i32, nh as i32)));
-                        });
+                        toplevel.with_pending_state(|s| s.size = Some(Size::from((nw as i32, nh as i32))));
                         toplevel.send_configure();
                     }
                 }
@@ -371,22 +380,13 @@ fn handle_button_event(
         state.grab = None;
     }
 
-    // ── Click-to-focus on plain left click (no Mod) ───────────────
+    // ── Click-to-focus (plain left click) ─────────────────────────
     if is_press && is_left && !state.mod_pressed {
-        let logical = Point::<f64, Logical>::from((
-            state.pointer_location.x,
-            state.pointer_location.y,
-        ));
-
-        let hit = state.space.element_under(logical).map(|(w, _)| {
-            let surface = surface_from_window(w);
-            let gid = find_gid(state, w);
-            (gid, surface)
-        });
-
-        if let Some((window_id, surface_opt)) = hit {
+        let logical = Point::<f64, Logical>::from((state.pointer_location.x, state.pointer_location.y));
+        if let Some((window, _loc)) = state.space.element_under(logical) {
+            let window_id = find_gid(state, window);
             state.focused_gid = window_id;
-            if let Some(surface) = surface_opt {
+            if let Some(surface) = surface_from_window(window) {
                 keyboard.set_focus(state, Some(surface), 0.into());
             }
             if let Some(gid) = window_id {
@@ -398,13 +398,7 @@ fn handle_button_event(
         }
     }
 
-    // ── Forward to client ─────────────────────────────────────────
-    let button_event = ButtonEvent {
-        serial: serial.into(),
-        time: 0,
-        button: code,
-        state: btn_state,
-    };
+    let button_event = ButtonEvent { serial: serial.into(), time: 0, button: code, state: btn_state };
     pointer.button(state, &button_event);
     pointer.frame(state);
 }
@@ -438,18 +432,19 @@ pub fn run_winit() -> Result<(), Box<dyn std::error::Error>> {
     );
     let mode = Mode { size, refresh: 60_000 };
     output.create_global::<AtlasState>(&dh);
-    output.change_current_state(
-        Some(mode),
-        Some(Transform::Flipped180),
-        None,
-        Some((0, 0).into()),
-    );
+    output.change_current_state(Some(mode), Some(Transform::Flipped180), None, Some((0, 0).into()));
     output.set_preferred(mode);
 
-    let damage_tracker =
-        smithay::backend::renderer::damage::OutputDamageTracker::from_output(&output);
-
+    let damage_tracker = smithay::backend::renderer::damage::OutputDamageTracker::from_output(&output);
     let xdg_shell_state = smithay::wayland::shell::xdg::XdgShellState::new::<AtlasState>(&dh);
+
+    // ── KDE Server-Side Decorations (SSD) ──────────────────────────
+    let kde_decoration_state = smithay::wayland::shell::kde::decoration::KdeDecorationState::new::<AtlasState>(
+        &dh, SsdMode::Server,
+    );
+
+    // ── Layer Shell (wlr-layer-shell) ──────────────────────────────
+    let layer_shell_state = smithay::wayland::shell::wlr_layer::WlrLayerShellState::new::<AtlasState>(&dh);
 
     let socket_source = ListeningSocketSource::new_auto()?;
     let socket_name = socket_source.socket_name().to_string_lossy().into_owned();
@@ -458,10 +453,7 @@ pub fn run_winit() -> Result<(), Box<dyn std::error::Error>> {
     event_loop.handle().insert_source(
         socket_source,
         |client_stream, _, data: &mut AtlasState| {
-            if let Err(err) = data
-                .display_handle
-                .insert_client(client_stream, Arc::new(ClientState::default()))
-            {
+            if let Err(err) = data.display_handle.insert_client(client_stream, Arc::new(ClientState::default())) {
                 warn!("Error adding wayland client: {}", err);
             }
         },
@@ -470,9 +462,7 @@ pub fn run_winit() -> Result<(), Box<dyn std::error::Error>> {
     event_loop.handle().insert_source(
         Generic::new(display, Interest::READ, LoopMode::Level),
         |_, display, data| {
-            unsafe {
-                display.get_mut().dispatch_clients(data).unwrap();
-            }
+            unsafe { display.get_mut().dispatch_clients(data).unwrap(); }
             Ok(PostAction::Continue)
         },
     )?;
@@ -507,6 +497,9 @@ pub fn run_winit() -> Result<(), Box<dyn std::error::Error>> {
         serial_counter: 0,
         focused_gid: None,
         cursor_status: smithay::input::pointer::CursorImageStatus::default_named(),
+        kde_decoration_state,
+        layer_shell_state,
+        layer_surfaces: Vec::new(),
     };
 
     info!("Initialization completed, starting the main loop.");
@@ -527,30 +520,21 @@ pub fn run_winit() -> Result<(), Box<dyn std::error::Error>> {
                 state.output.set_preferred(mode);
             }
             WinitEvent::Input(event) => match event {
-                InputEvent::Keyboard { event } => {
-                    handle_keyboard_event(&mut state, &event, &keyboard);
-                }
-
+                InputEvent::Keyboard { event } => handle_keyboard_event(&mut state, &event, &keyboard),
                 InputEvent::PointerMotionAbsolute { event } => {
                     let phys = Point::<f64, Physical>::from((event.x(), event.y()));
                     let logical = Point::<f64, Logical>::from((phys.x, phys.y));
                     handle_motion_event(&mut state, &pointer, phys, logical);
                 }
-
                 InputEvent::PointerButton { event } => {
                     state.serial_counter += 1;
                     let serial = state.serial_counter;
                     handle_button_event(
-                        &mut state,
-                        &pointer,
-                        &keyboard,
+                        &mut state, &pointer, &keyboard,
                         event.state() == ButtonState::Pressed,
-                        event.button_code(),
-                        event.state(),
-                        serial,
+                        event.button_code(), event.state(), serial,
                     );
                 }
-
                 _ => {}
             },
             _ => (),
@@ -558,37 +542,28 @@ pub fn run_winit() -> Result<(), Box<dyn std::error::Error>> {
 
         match status {
             PumpStatus::Continue => (),
-            PumpStatus::Exit(_) => {
-                state.running = false;
-                break;
-            }
+            PumpStatus::Exit(_) => { state.running = false; break; }
         }
 
         // ── Spatial sync ──────────────────────────────────────────
         let screen_size = backend.window_size();
         sync_space_with_viewport(&mut state, screen_size);
         state.space.refresh();
+        prune_layer_surfaces(&mut state);
 
-        let age = if full_redraw > 0 {
-            full_redraw -= 1;
-            0
-        } else {
-            backend.buffer_age().unwrap_or(0)
-        };
-        let clear_color = Color32F::new(0.1, 0.0, 0.0, 1.0);
+        // ── Build border elements ──────────────────────────────────
+        let border_elements = build_border_elements(&state);
+
+        let age = if full_redraw > 0 { full_redraw -= 1; 0 } else { backend.buffer_age().unwrap_or(0) };
 
         // ── Render ────────────────────────────────────────────────
         let (damage_to_submit, frame_time) = {
             let (renderer, mut framebuffer) = match backend.bind() {
                 Ok(ret) => ret,
-                Err(err) => {
-                    error!("Failed to bind renderer: {}", err);
-                    break;
-                }
+                Err(err) => { error!("Failed to bind renderer: {}", err); break; }
             };
 
-            let custom_elements: &[SolidColorRenderElement] = &[];
-
+            // pass 1: main space + borders (custom_elements)
             let result = render_output(
                 &state.output,
                 renderer,
@@ -596,18 +571,39 @@ pub fn run_winit() -> Result<(), Box<dyn std::error::Error>> {
                 1.0,
                 age,
                 std::slice::from_ref(&state.space),
-                custom_elements,
+                &border_elements,
                 &mut state.damage_tracker,
-                clear_color,
+                Color32F::new(0.1, 0.0, 0.0, 1.0),
             );
+
+            /*
+             * TODO: Layer shell HUD rendering.
+             *
+             * Layer-shell surfaces live OUTSIDE GlobalSpace — they are
+             * anchored to the physical output and should NOT scroll
+             * with the viewport.  To render them:
+             *
+             *   1. Iterate state.layer_surfaces (pruned above).
+             *   2. For each layer surface, compute its screen position
+             *      from its cached state (anchor, margin, layer, size).
+             *   3. Import the WlSurface buffer and create a
+             *      WaylandSurfaceRenderElement at that position.
+             *   4. Render them on top (overlay) or below (background)
+             *      the main space.
+             *
+             * The simplest integration point is a *second* call to
+             * damage_tracker.render_output() with the collected
+             * layer-shell elements after the main pass — but the
+             * clear_color must be transparent / skip clear.
+             *
+             * For now the protocol surfaces are registered and
+             * configured; the visual HUD pass is deferred.
+             */
 
             let frame_time = start_time.elapsed();
             match result {
-                Ok(render_output_result) => (render_output_result.damage.cloned(), frame_time),
-                Err(err) => {
-                    warn!("Rendering error: {:?}", err);
-                    (None, frame_time)
-                }
+                Ok(r) => (r.damage.cloned(), frame_time),
+                Err(err) => { warn!("Rendering error: {:?}", err); (None, frame_time) }
             }
         };
 
@@ -623,9 +619,7 @@ pub fn run_winit() -> Result<(), Box<dyn std::error::Error>> {
         for window in state.space.elements() {
             if state.space.outputs_for_element(window).contains(&output_for_frames) {
                 window.send_frame(
-                    &output_for_frames,
-                    frame_time,
-                    None,
+                    &output_for_frames, frame_time, None,
                     |_, _| Some(output_for_frames.clone()),
                 );
             }
