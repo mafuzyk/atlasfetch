@@ -187,24 +187,29 @@ pub fn prune_layer_surfaces(state: &mut AtlasState) {
 /// ── Keyboard ─────────────────────────────────────────────────────
 
 pub fn spawn_terminal() {
-    for cmd in &["alacritty", "kitty", "foot", "gnome-terminal", "weston-terminal"] {
+    let wl_display = std::env::var("WAYLAND_DISPLAY").ok();
+    for cmd in &["fish", "alacritty", "kitty", "foot", "gnome-terminal", "weston-terminal"] {
         if std::process::Command::new("which")
             .arg(cmd)
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status()
-            .is_ok()
+            .map(|s| s.success())
+            .unwrap_or(false)
         {
-            let _ = std::process::Command::new(cmd)
-                .spawn()
-                .map(|_| info!("Spawned terminal: {}", cmd));
+            let mut child = std::process::Command::new(cmd);
+            if let Some(ref display) = wl_display {
+                child.env("WAYLAND_DISPLAY", display);
+            }
+            let _ = child.spawn().map(|_| info!("Spawned terminal: {}", cmd));
             return;
         }
     }
-    let _ = std::process::Command::new("xterm")
-        .env("WAYLAND_DISPLAY", std::env::var("WAYLAND_DISPLAY").unwrap_or_default())
-        .spawn()
-        .map(|_| info!("Spawned xterm"));
+    let mut child = std::process::Command::new("xterm");
+    if let Some(ref display) = wl_display {
+        child.env("WAYLAND_DISPLAY", display);
+    }
+    let _ = child.spawn().map(|_| info!("Spawned xterm"));
 }
 
 pub fn handle_keyboard_event<B: InputBackend>(
