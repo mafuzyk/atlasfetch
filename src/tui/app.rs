@@ -129,6 +129,14 @@ pub struct App {
     pub input_mode: InputMode,
     // Custom palette hex color input
     pub custom_palette_input: String,
+    // Label editor state
+    pub editing_label_side: PanelFocus,
+    pub editing_label_index: usize,
+    pub editing_label_input: String,
+    // File browser state
+    pub file_browser_entries: Vec<(String, bool)>, // (name, is_dir)
+    pub file_browser_cwd: std::path::PathBuf,
+    pub file_browser_selected: usize,
     // Error message to display
     pub error_message: Option<String>,
     // Success message
@@ -150,6 +158,8 @@ pub enum InputMode {
     EditingCustomPath,
     EditingPastedAscii,
     EditingCustomPalette,
+    EditingLabel,
+    BrowsingFile,
 }
 
 // ── Run ──────────────────────────────────────────────────────────────────
@@ -214,6 +224,12 @@ pub fn run(cfg: &mut Config) -> Result<()> {
         panel_focus: PanelFocus::Left,
         input_mode: InputMode::Normal,
         custom_palette_input: String::new(),
+        editing_label_side: PanelFocus::Left,
+        editing_label_index: 0,
+        editing_label_input: String::new(),
+        file_browser_entries: Vec::new(),
+        file_browser_cwd: std::env::home_dir().unwrap_or_else(|| "/".into()),
+        file_browser_selected: 0,
         error_message: None,
         saved: false,
         term_width: 80,
@@ -385,6 +401,99 @@ fn handle_event(app: &mut App) -> Result<bool> {
                     }
                     return Ok(true);
                 }
+                InputMode::EditingLabel => {
+                    match key.code {
+                        KeyCode::Enter => {
+                            let new_label = app.editing_label_input.trim().to_string();
+                            let fields = match app.editing_label_side {
+                                PanelFocus::Left => &mut app.cfg.display.left,
+                                PanelFocus::Right => &mut app.cfg.display.right,
+                            };
+                            if app.editing_label_index < fields.len() && !new_label.is_empty() {
+                                fields[app.editing_label_index].label = new_label;
+                            }
+                            app.input_mode = InputMode::Normal;
+                        }
+                        KeyCode::Esc => {
+                            app.input_mode = InputMode::Normal;
+                        }
+                        KeyCode::Backspace => {
+                            app.editing_label_input.pop();
+                        }
+                        KeyCode::Char(c) => {
+                            app.editing_label_input.push(c);
+                        }
+                        _ => {}
+                    }
+                    return Ok(true);
+                }
+                InputMode::BrowsingFile => {
+                    match key.code {
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            if app.file_browser_selected > 0 {
+                                app.file_browser_selected -= 1;
+                            }
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            if app.file_browser_selected + 1 < app.file_browser_entries.len() {
+                                app.file_browser_selected += 1;
+                            }
+                        }
+                        KeyCode::Enter => {
+                            if app.file_browser_selected < app.file_browser_entries.len() {
+                                let (name, is_dir) = &app.file_browser_entries[app.file_browser_selected];
+                                if *is_dir {
+                                    // Enter directory
+                                    let new_path = app.file_browser_cwd.join(name);
+                                    if new_path.is_dir() {
+                                        app.file_browser_cwd = new_path;
+                                        app.file_browser_selected = 0;
+                                        refresh_file_browser(app);
+                                    }
+                                } else {
+                                    // Select file as ASCII
+                                    let path = app.file_browser_cwd.join(name);
+                                    match std::fs::read_to_string(&path) {
+                                        Ok(content) if !content.trim().is_empty() => {
+                                            app.current_ascii = content.trim_end().to_string();
+                                            app.ascii_source = AsciiSource::CustomFile;
+                                            app.cfg.logo.key = String::new();
+                                            app.cfg.logo.path = path.to_string_lossy().to_string();
+                                            app.error_message = None;
+                                            app.input_mode = InputMode::Normal;
+                                        }
+                                        Ok(_) => {
+                                            app.error_message = Some("File is empty.".into());
+                                        }
+                                        Err(e) => {
+                                            app.error_message = Some(format!("Cannot read: {}", e));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        KeyCode::Char('~') => {
+                            if let Some(home) = std::env::home_dir() {
+                                app.file_browser_cwd = home;
+                                app.file_browser_selected = 0;
+                                refresh_file_browser(app);
+                            }
+                        }
+                        KeyCode::Esc => {
+                            app.input_mode = InputMode::Normal;
+                        }
+                        KeyCode::Backspace => {
+                            // Go up one directory
+                            if let Some(parent) = app.file_browser_cwd.parent() {
+                                app.file_browser_cwd = parent.to_path_buf();
+                                app.file_browser_selected = 0;
+                                refresh_file_browser(app);
+                            }
+                        }
+                        _ => {}
+                    }
+                    return Ok(true);
+                }
                 InputMode::Normal => {
                     match app.step {
                         Step::Welcome => {
@@ -453,9 +562,11 @@ fn handle_event(app: &mut App) -> Result<bool> {
                                     }
                                 }
                                 KeyCode::Char('c') => {
-                                    // Custom file
-                                    app.input_mode = InputMode::EditingCustomPath;
-                                    app.custom_ascii_path.clear();
+                                    // File browser for custom ASCII
+                                    app.input_mode = InputMode::BrowsingFile;
+                                    app.file_browser_cwd = std::env::home_dir().unwrap_or_else(|| "/".into());
+                                    app.file_browser_selected = 0;
+                                    refresh_file_browser(app);
                                     app.error_message = None;
                                 }
                                 KeyCode::Char('p') => {
@@ -594,6 +705,23 @@ fn handle_event(app: &mut App) -> Result<bool> {
                                                 }
                                             }
                                         }
+                                    }
+                                }
+                                KeyCode::Char('e') => {
+                                    // Edit label
+                                    let (side, idx) = match app.panel_focus {
+                                        PanelFocus::Left => (PanelFocus::Left, app.panel_left_state.selected().unwrap_or(0)),
+                                        PanelFocus::Right => (PanelFocus::Right, app.panel_right_state.selected().unwrap_or(0)),
+                                    };
+                                    let fields = match side {
+                                        PanelFocus::Left => &app.cfg.display.left,
+                                        PanelFocus::Right => &app.cfg.display.right,
+                                    };
+                                    if idx < fields.len() {
+                                        app.editing_label_side = side;
+                                        app.editing_label_index = idx;
+                                        app.editing_label_input = fields[idx].label.clone();
+                                        app.input_mode = InputMode::EditingLabel;
                                     }
                                 }
                                 KeyCode::Enter | KeyCode::Right => {
@@ -764,6 +892,33 @@ fn shellexpand(s: &str) -> std::path::PathBuf {
     } else {
         std::path::PathBuf::from(s)
     }
+}
+
+fn refresh_file_browser(app: &mut App) {
+    let mut entries = Vec::new();
+    if let Ok(dir) = std::fs::read_dir(&app.file_browser_cwd) {
+        for entry in dir.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') {
+                continue;
+            }
+            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            entries.push((name, is_dir));
+        }
+    }
+    // Sort: directories first, then files
+    entries.sort_by(|a, b| {
+        if a.1 != b.1 {
+            b.1.cmp(&a.1)
+        } else {
+            a.0.cmp(&b.0)
+        }
+    });
+    // Add ".." entry at the top if not at root
+    if app.file_browser_cwd.parent().is_some() {
+        entries.insert(0, ("..".into(), true));
+    }
+    app.file_browser_entries = entries;
 }
 
 // ── UI rendering ─────────────────────────────────────────────────────────
@@ -1016,13 +1171,39 @@ fn render_ascii_selection(frame: &mut Frame, area: Rect, app: &mut App) {
         InputMode::EditingCustomPalette => {
             String::new()
         }
+        InputMode::EditingLabel => {
+            String::new()
+        }
+        InputMode::BrowsingFile => {
+            format!(" File browser: {}  ({} entries)", app.file_browser_cwd.display(), app.file_browser_entries.len())
+        }
     };
     let mode_widget = Paragraph::new(Span::raw(mode_text))
         .block(Block::default().borders(Borders::ALL).title("ASCII Art").border_type(BorderType::Rounded));
     frame.render_widget(mode_widget, chunks[0]);
 
-    // Content: logo list or input
-    if app.input_mode == InputMode::Normal {
+    if app.input_mode == InputMode::BrowsingFile {
+        let items: Vec<ListItem> = app.file_browser_entries.iter().map(|(name, is_dir)| {
+            let display = if *is_dir {
+                format!("  {}/", name)
+            } else {
+                format!("  {}", name)
+            };
+            let style = if *is_dir {
+                Style::default().fg(TuiColor::Cyan)
+            } else {
+                Style::default()
+            };
+            ListItem::new(Line::from(Span::styled(display, style)))
+        }).collect();
+        app.logo_list_state.select(Some(app.file_browser_selected));
+        let stateful_list = List::new(items)
+            .block(Block::default().borders(Borders::ALL).title(app.file_browser_cwd.to_string_lossy()).border_type(BorderType::Rounded))
+            .highlight_style(Style::default().bg(TuiColor::Rgb(60, 60, 80)));
+        frame.render_stateful_widget(stateful_list, chunks[1], &mut app.logo_list_state);
+    } else if app.input_mode == InputMode::EditingLabel {
+        // Label editing is shown on panel screen, not here
+    } else if app.input_mode == InputMode::Normal {
         match &app.ascii_source {
             AsciiSource::Builtin(_) => {
                 let items: Vec<ListItem> = app.logo_keys.iter().map(|k| {
@@ -1077,6 +1258,23 @@ fn render_layout_selection(frame: &mut Frame, area: Rect, app: &mut App) {
 // ── Panel editor ─────────────────────────────────────────────────────────
 
 fn render_panel_editor(frame: &mut Frame, area: Rect, app: &mut App) {
+    // If editing a label, show the editor overlay
+    if app.input_mode == InputMode::EditingLabel {
+        let label = format!("Editing label: {}", app.editing_label_input);
+        let text = Text::from(vec![
+            Line::from(Span::raw("")),
+            Line::from(Span::styled(" Edit field label", Style::default().bold())),
+            Line::from(Span::raw("")),
+            Line::from(Span::raw(&label)),
+            Line::from(Span::raw("")),
+            Line::from(Span::styled(" Enter to save, Esc to cancel", Style::default().fg(TuiColor::Gray))),
+        ]);
+        let widget = Paragraph::new(text)
+            .block(Block::default().borders(Borders::ALL).title("Label Editor").border_type(BorderType::Rounded));
+        frame.render_widget(widget, area);
+        return;
+    }
+
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -1275,8 +1473,14 @@ fn render_footer(frame: &mut Frame, area: Rect, app: &App) {
             let prev = if app.step.prev().is_some() { "[←] Back" } else { "" };
             let next = if app.step.next().is_some() { "[→/Tab] Next" } else { "[Enter] Save" };
             let extra = match app.step {
-                Step::Ascii => "  |  [c]ustom  [p]aste  [d]isable".to_string(),
-                Step::Panels => "  |  [Space] toggle  [r] reorder up  [Tab] switch side".to_string(),
+                Step::Ascii => {
+                    if app.input_mode == InputMode::BrowsingFile {
+                        "  [~] home  [Backspace] up  [Enter] select  [Esc] cancel".to_string()
+                    } else {
+                        "  [c]ustom  [p]aste  [d]isable".to_string()
+                    }
+                }
+                Step::Panels => "  [Space] toggle  [r] reorder up  [e] edit label  [Tab] switch side".to_string(),
                 _ => String::new(),
             };
             format!(" {}  |  {}  {}", prev, next, extra)
