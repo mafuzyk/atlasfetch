@@ -127,6 +127,8 @@ pub struct App {
     pub panel_focus: PanelFocus,
     // Input mode for custom fields
     pub input_mode: InputMode,
+    // Custom palette hex color input
+    pub custom_palette_input: String,
     // Error message to display
     pub error_message: Option<String>,
     // Success message
@@ -147,6 +149,7 @@ pub enum InputMode {
     Normal,
     EditingCustomPath,
     EditingPastedAscii,
+    EditingCustomPalette,
 }
 
 // ── Run ──────────────────────────────────────────────────────────────────
@@ -210,6 +213,7 @@ pub fn run(cfg: &mut Config) -> Result<()> {
         panel_right_state,
         panel_focus: PanelFocus::Left,
         input_mode: InputMode::Normal,
+        custom_palette_input: String::new(),
         error_message: None,
         saved: false,
         term_width: 80,
@@ -345,6 +349,42 @@ fn handle_event(app: &mut App) -> Result<bool> {
                     }
                     return Ok(true);
                 }
+                InputMode::EditingCustomPalette => {
+                    match key.code {
+                        KeyCode::Enter => {
+                            let input = app.custom_palette_input.trim();
+                            if input.is_empty() {
+                                app.error_message = Some("Enter at least one hex color, e.g. #FF6692 #FF9A98".into());
+                            } else {
+                                let colors: Vec<Color> = input.split_whitespace()
+                                    .filter_map(|s| Color::from_hex_opt(s))
+                                    .collect();
+                                if colors.is_empty() {
+                                    app.error_message = Some("No valid hex colors found. Use format: #RRGGBB #RRGGBB ...".into());
+                                } else {
+                                    app.cfg.logo.colors = colors.clone();
+                                    // Save to custom_palettes for persistence
+                                    let name = format!("custom_{}", colors.iter().map(|c| c.to_hex_string()).collect::<Vec<_>>().join("_"));
+                                    app.cfg.custom_palettes.insert(name, colors);
+                                    app.error_message = None;
+                                    app.input_mode = InputMode::Normal;
+                                }
+                            }
+                        }
+                        KeyCode::Esc => {
+                            app.input_mode = InputMode::Normal;
+                            app.error_message = None;
+                        }
+                        KeyCode::Backspace => {
+                            app.custom_palette_input.pop();
+                        }
+                        KeyCode::Char(c) => {
+                            app.custom_palette_input.push(c);
+                        }
+                        _ => {}
+                    }
+                    return Ok(true);
+                }
                 InputMode::Normal => {
                     match app.step {
                         Step::Welcome => {
@@ -375,6 +415,11 @@ fn handle_event(app: &mut App) -> Result<bool> {
                                         app.theme_list_state.select(Some(i - 1));
                                         apply_theme(app, i - 1);
                                     }
+                                }
+                                KeyCode::Char('c') => {
+                                    app.input_mode = InputMode::EditingCustomPalette;
+                                    app.custom_palette_input.clear();
+                                    app.error_message = None;
                                 }
                                 KeyCode::Enter | KeyCode::Tab | KeyCode::Right => {
                                     if let Some(next) = app.step.next() {
@@ -673,6 +718,15 @@ fn apply_theme(app: &mut App, index: usize) {
     let themes = theme::all_themes();
     if index < themes.len() {
         app.cfg.logo.colors = themes[index].colors.clone();
+        return;
+    }
+    // Check custom palettes appended after presets
+    let custom_idx = index.saturating_sub(themes.len());
+    let custom_names: Vec<String> = app.cfg.custom_palettes.keys().cloned().collect();
+    if custom_idx < custom_names.len() {
+        if let Some(colors) = app.cfg.custom_palettes.get(&custom_names[custom_idx]) {
+            app.cfg.logo.colors = colors.clone();
+        }
     }
 }
 
@@ -830,8 +884,13 @@ fn render_welcome(frame: &mut Frame, area: Rect) {
 // ── Theme selection ──────────────────────────────────────────────────────
 
 fn render_theme_selection(frame: &mut Frame, area: Rect, app: &mut App) {
+    if app.input_mode == InputMode::EditingCustomPalette {
+        render_custom_palette_editor(frame, area, app);
+        return;
+    }
+
     let themes = theme::all_themes();
-    let items: Vec<ListItem> = themes.iter().enumerate().map(|(_i, t)| {
+    let mut items: Vec<ListItem> = themes.iter().map(|t| {
         let color_preview: Vec<Span> = t.colors.iter().map(|c| {
             Span::styled("  ", Style::default().bg(TuiColor::Rgb(c.r, c.g, c.b)))
         }).collect();
@@ -846,11 +905,87 @@ fn render_theme_selection(frame: &mut Frame, area: Rect, app: &mut App) {
         ListItem::new(Line::from(spans))
     }).collect();
 
+    // Append custom palettes from config
+    let custom_names: Vec<String> = app.cfg.custom_palettes.keys().cloned().collect();
+    for name in &custom_names {
+        if let Some(colors) = app.cfg.custom_palettes.get(name) {
+            if colors == app.cfg.logo.colors.as_slice() {
+                // Already selected — show with indicator
+            }
+            let color_preview: Vec<Span> = colors.iter().map(|c| {
+                Span::styled("  ", Style::default().bg(TuiColor::Rgb(c.r, c.g, c.b)))
+            }).collect();
+            let mut spans = vec![
+                Span::raw("  "),
+                Span::styled(name, Style::default().bold()),
+                Span::raw("  "),
+            ];
+            spans.extend(color_preview);
+            items.push(ListItem::new(Line::from(spans)));
+        }
+    }
+
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title("Theme").border_type(BorderType::Rounded))
         .highlight_style(Style::default().bg(TuiColor::Rgb(60, 60, 80)));
 
     frame.render_stateful_widget(list, area, &mut app.theme_list_state);
+}
+
+fn render_custom_palette_editor(frame: &mut Frame, area: Rect, app: &mut App) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(4), Constraint::Min(1)])
+        .split(area);
+
+    // Parse current input into colors for live preview
+    let parsed: Vec<Color> = app.custom_palette_input.split_whitespace()
+        .filter_map(|s| Color::from_hex_opt(s))
+        .collect();
+
+    let input_display = if app.custom_palette_input.is_empty() {
+        "Enter hex colors (space-separated): ".to_string()
+    } else {
+        format!("Enter hex colors: {}", app.custom_palette_input)
+    };
+
+    // Show input with cursor indicator
+    let mut spans = vec![
+        Span::styled(" ", Style::default().fg(TuiColor::Green)),
+    ];
+    // Live swatch of parsed colors
+    for c in &parsed {
+        spans.push(Span::styled("  ", Style::default().bg(TuiColor::Rgb(c.r, c.g, c.b))));
+    }
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled(&input_display, Style::default()));
+
+    let input_widget = Paragraph::new(Line::from(spans))
+        .block(Block::default().borders(Borders::ALL).title("Custom Palette").border_type(BorderType::Rounded));
+    frame.render_widget(input_widget, chunks[0]);
+
+    // Show instructions and current colors preview
+    let mut lines = vec![
+        Line::from(Span::raw("Type hex colors separated by spaces.")),
+        Line::from(Span::raw("Example: #FF6692 #FF9A98 #FFB883 #FBFFA8")),
+        Line::from(Span::raw("")),
+    ];
+
+    if !parsed.is_empty() {
+        lines.push(Line::from(Span::styled("Preview:", Style::default().bold())));
+        let swatch_line: Vec<Span> = parsed.iter().map(|c| {
+            Span::styled("  ", Style::default().bg(TuiColor::Rgb(c.r, c.g, c.b)))
+        }).collect();
+        lines.push(Line::from(swatch_line));
+        lines.push(Line::from(Span::raw("")));
+        lines.push(Line::from(Span::styled("Press Enter to apply.", Style::default().fg(TuiColor::Green))));
+    } else {
+        lines.push(Line::from(Span::styled("Press Esc to cancel.", Style::default().fg(TuiColor::Gray))));
+    }
+
+    let text_widget = Paragraph::new(Text::from(lines))
+        .block(Block::default().borders(Borders::ALL).title("Colors").border_type(BorderType::Rounded));
+    frame.render_widget(text_widget, chunks[1]);
 }
 
 // ── ASCII selection ──────────────────────────────────────────────────────
@@ -877,6 +1012,9 @@ fn render_ascii_selection(frame: &mut Frame, area: Rect, app: &mut App) {
         }
         InputMode::EditingPastedAscii => {
             format!(" Paste ASCII (Enter to finish): {}", app.pasted_ascii)
+        }
+        InputMode::EditingCustomPalette => {
+            String::new()
         }
     };
     let mode_widget = Paragraph::new(Span::raw(mode_text))
@@ -1125,7 +1263,15 @@ fn render_ascii_only_preview(frame: &mut Frame, area: Rect, app: &App) {
 fn render_footer(frame: &mut Frame, area: Rect, app: &App) {
     let nav = match app.step {
         Step::Welcome => " [Enter/Space] Begin  |  [q/Esc] Quit".to_string(),
-        Step::Theme | Step::Ascii | Step::Layout | Step::Panels => {
+        Step::Theme => {
+            let extra = if app.input_mode == InputMode::EditingCustomPalette {
+                "  [Enter] apply  [Esc] cancel".to_string()
+            } else {
+                "  [c] custom palette".to_string()
+            };
+            format!(" [←] Back  |  [→/Tab] Next  {}", extra)
+        }
+        Step::Ascii | Step::Layout | Step::Panels => {
             let prev = if app.step.prev().is_some() { "[←] Back" } else { "" };
             let next = if app.step.next().is_some() { "[→/Tab] Next" } else { "[Enter] Save" };
             let extra = match app.step {
