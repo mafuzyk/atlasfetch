@@ -14,7 +14,7 @@ Single binary · Linux · Written in Rust
 
 <br>
 
-<img src="" alt="atlasfetch screenshot" width="720">
+<img src="assets/fetch.png" alt="atlasfetch screenshot" width="720">
 
 </div>
 
@@ -339,21 +339,27 @@ Atlasfetch does one thing and tries to do it well: display your system with cent
 
 <div align="center">
 
-<img src="" alt="atlasfetch Arch Linux" width="600">
+<img src="assets/fetch.png" alt="atlasfetch running" width="600">
 <br>
-<em>Default Arch logo with arch color preset</em>
+<em>Default output with Arch logo and xenogender preset</em>
 
 <br><br>
 
-<img src="" alt="atlasfetch NixOS" width="600">
-<br>
-<em>NixOS logo with catppuccin-mocha preset</em>
-
-<br><br>
-
-<img src="" alt="atlasfetch narrow terminal" width="400">
+<img src="assets/narrow.png" alt="atlasfetch narrow terminal" width="400">
 <br>
 <em>Narrow terminal — ASCII hidden, panels remain</em>
+
+<br><br>
+
+<img src="assets/panels.png" alt="TUI panel editor" width="600">
+<br>
+<em>TUI configurator — Panels step</em>
+
+<br><br>
+
+<img src="assets/summary.png" alt="TUI summary screen" width="600">
+<br>
+<em>TUI configurator — Summary with live preview</em>
 
 </div>
 
