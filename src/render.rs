@@ -238,8 +238,9 @@ pub fn render_preview(cfg: &Config, info: &SysInfo, ascii_art: &str, term_width:
     } else {
         let lw_test = logo_lines.iter().map(|l| UnicodeWidthStr::width(*l)).max().unwrap_or(0);
         let origin_test = (tw.saturating_sub(lw_test)) / 2;
-        if origin_test < left_pad + gap + 8
-            || tw < origin_test + lw_test + gap + right_pad + max_shift + 8
+        // Reduced minimum from 8 to 4 to allow logos on 80-col terminals
+        if origin_test < left_pad + gap + 4
+            || tw < origin_test + lw_test + gap + right_pad + max_shift + 4
         {
             Vec::new()
         } else {

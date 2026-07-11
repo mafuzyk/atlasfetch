@@ -44,7 +44,7 @@ pub fn load(cfg: &config::Config) -> Result<String> {
     // Fall back to logo path
     let logo_path = shellexpand(&cfg.logo.path)?;
     if let Ok(art) = fs::read_to_string(&logo_path) {
-        let trimmed = art.trim().to_string();
+        let trimmed = art.trim_end().to_string();
         if !trimmed.is_empty() {
             return Ok(trimmed);
         }
