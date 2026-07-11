@@ -1232,7 +1232,7 @@ fn render_ascii_selection(frame: &mut Frame, area: Rect, app: &mut App) {
                     .highlight_style(Style::default().bg(TuiColor::Rgb(60, 60, 80)));
                 frame.render_stateful_widget(list, sub[1], &mut app.logo_list_state);
             }
-            AsciiSource::Pasted(art) => {
+            AsciiSource::Pasted(_art) => {
                 let sub = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints([Constraint::Length(3), Constraint::Min(1)])
