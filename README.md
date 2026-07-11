@@ -8,6 +8,7 @@ Single binary · Linux · Written in Rust
 [![Rust](https://img.shields.io/badge/rust-1.85+-DEA584?style=flat-square&logo=rust&logoColor=white)](https://rust-lang.org)
 [![License](https://img.shields.io/badge/license-GPL--3.0-8A2BE2?style=flat-square)](LICENSE)
 [![Status](https://img.shields.io/badge/status-stable-22AA66?style=flat-square)]()
+[![CI](https://github.com/mafuzyk/atlasfetch/actions/workflows/release.yml/badge.svg)](https://github.com/mafuzyk/atlasfetch/actions/workflows/release.yml)
 <br>
 [Features](#features) · [Install](#install) · [Usage](#usage) · [Customization](#customization) · [Design Philosophy](#design-philosophy) · [Roadmap](#roadmap)
 
@@ -159,9 +160,9 @@ The configurator walks through six screens:
 | Step | What you choose |
 |------|----------------|
 | **Theme** | One of 25 color presets — flag themes or curated palettes |
-| **ASCII** | Your distro logo (18 included) or a custom file |
+| **ASCII** | Pick a built-in logo (18 included) or press `c` to browse your filesystem for a custom ASCII file |
 | **Layout** | How panels are positioned (Centered, Compact, Wide, Minimal, Balanced) |
-| **Panels** | Which fields appear, their order, and labels |
+| **Panels** | Which fields appear, their order, and labels — press `e` on any field to rename its label |
 | **Summary** | Review everything and save |
 
 Every screen shows a live preview of how the output will look. Changes appear instantly — no save-and-reload cycle.
