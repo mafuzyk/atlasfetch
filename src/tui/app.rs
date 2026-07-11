@@ -1154,7 +1154,7 @@ fn render_ascii_selection(frame: &mut Frame, area: Rect, app: &mut App) {
     // Tabs / mode selection
     let mode_text = match app.input_mode {
         InputMode::Normal => format!(
-            " [b] Built-in  |  [c] Custom file  |  [p] Paste  |  [d] Disable  (current: {})",
+            " [b] Built-in logos  |  [c] Browse files  |  [p] Paste  |  [d] Disable  (current: {})",
             match &app.ascii_source {
                 AsciiSource::Builtin(k) => k.as_str(),
                 AsciiSource::CustomFile => "custom file",
@@ -1215,22 +1215,58 @@ fn render_ascii_selection(frame: &mut Frame, area: Rect, app: &mut App) {
                 frame.render_stateful_widget(list, chunks[1], &mut app.logo_list_state);
             }
             AsciiSource::CustomFile => {
-                let text = Paragraph::new(Text::from(vec![
-                    Line::from(Span::raw("Custom file selected.")),
-                    Line::from(Span::raw("Press 'c' to change the path.")),
-                ]));
-                frame.render_widget(text, chunks[1]);
+                let sub = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([Constraint::Length(2), Constraint::Min(1)])
+                    .split(chunks[1]);
+                let info = Paragraph::new(Line::from(Span::styled(
+                    format!(" Custom file: {}", app.cfg.logo.path),
+                    Style::default().fg(TuiColor::Green),
+                )));
+                frame.render_widget(info, sub[0]);
+                let items: Vec<ListItem> = app.logo_keys.iter().map(|k| {
+                    ListItem::new(format!("  {}", k))
+                }).collect();
+                let list = List::new(items)
+                    .block(Block::default().borders(Borders::NONE))
+                    .highlight_style(Style::default().bg(TuiColor::Rgb(60, 60, 80)));
+                frame.render_stateful_widget(list, sub[1], &mut app.logo_list_state);
             }
             AsciiSource::Pasted(art) => {
-                let preview_lines: Vec<Line> = art.lines().map(|l| Line::from(Span::raw(l))).collect();
-                let text = Text::from(preview_lines);
-                let paragraph = Paragraph::new(text)
-                    .block(Block::default().borders(Borders::ALL).title("Pasted ASCII"));
-                frame.render_widget(paragraph, chunks[1]);
+                let sub = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([Constraint::Length(3), Constraint::Min(1)])
+                    .split(chunks[1]);
+                let info = Paragraph::new(Line::from(Span::styled(
+                    " Pasted ASCII (press 'p' to change)",
+                    Style::default().fg(TuiColor::Green),
+                )));
+                frame.render_widget(info, sub[0]);
+                let items: Vec<ListItem> = app.logo_keys.iter().map(|k| {
+                    ListItem::new(format!("  {}", k))
+                }).collect();
+                let list = List::new(items)
+                    .block(Block::default().borders(Borders::NONE))
+                    .highlight_style(Style::default().bg(TuiColor::Rgb(60, 60, 80)));
+                frame.render_stateful_widget(list, sub[1], &mut app.logo_list_state);
             }
             AsciiSource::Disabled => {
-                let text = Paragraph::new("ASCII art disabled. Panels only.");
-                frame.render_widget(text, chunks[1]);
+                let sub = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([Constraint::Length(2), Constraint::Min(1)])
+                    .split(chunks[1]);
+                let info = Paragraph::new(Line::from(Span::styled(
+                    " ASCII disabled (press 'b' to pick a built-in)",
+                    Style::default().fg(TuiColor::Gray),
+                )));
+                frame.render_widget(info, sub[0]);
+                let items: Vec<ListItem> = app.logo_keys.iter().map(|k| {
+                    ListItem::new(format!("  {}", k))
+                }).collect();
+                let list = List::new(items)
+                    .block(Block::default().borders(Borders::NONE))
+                    .highlight_style(Style::default().bg(TuiColor::Rgb(60, 60, 80)));
+                frame.render_stateful_widget(list, sub[1], &mut app.logo_list_state);
             }
         }
     }
