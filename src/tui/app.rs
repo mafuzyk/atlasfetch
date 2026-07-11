@@ -95,6 +95,32 @@ pub enum AsciiSource {
     Disabled,            // no ASCII
 }
 
+/// All known field types with their default icon and label.
+const ALL_FIELDS: &[(&str, &str, &str)] = &[
+    ("os", "\u{f17c}", "OS"),
+    ("host", "\u{f109}", "Host"),
+    ("user", "\u{f007}", "Usr"),
+    ("kernel", "\u{e271}", "Krn"),
+    ("uptime", "\u{f017}", "Up"),
+    ("packages", "\u{f1b3}", "Pkg"),
+    ("shell", "\u{f489}", "Sh"),
+    ("terminal", "\u{f120}", "Term"),
+    ("cpu", "\u{f2db}", "CPU"),
+    ("gpu", "\u{f26c}", "GPU"),
+    ("memory", "\u{f1c0}", "Mem"),
+    ("disk", "\u{f0a0}", "Dsk"),
+    ("wm", "\u{f108}", "WM"),
+    ("load", "\u{f0e7}", "Load"),
+    ("processes", "\u{f013}", "Proc"),
+    ("local_ip", "\u{f0c1}", "IP"),
+    ("resolution", "\u{f108}", "Res"),
+    ("de", "\u{f11b}", "DE"),
+    ("font", "\u{f031}", "Font"),
+    ("vram", "\u{f26c}", "VRAM"),
+    ("flatpak", "\u{f2d8}", "Flatpak"),
+    ("snap", "\u{f1b3}", "Snap"),
+];
+
 // ── App state ────────────────────────────────────────────────────────────
 
 pub struct App {
@@ -144,6 +170,10 @@ pub struct App {
     // Terminal dimensions
     pub term_width: u16,
     pub term_height: u16,
+    // Panel addition state
+    pub add_panel_available: Vec<(&'static str, &'static str, &'static str)>,
+    pub add_panel_selected: usize,
+    pub add_panel_side: PanelFocus,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -160,6 +190,7 @@ pub enum InputMode {
     EditingCustomPalette,
     EditingLabel,
     BrowsingFile,
+    AddingPanel,
 }
 
 // ── Run ──────────────────────────────────────────────────────────────────
@@ -234,6 +265,9 @@ pub fn run(cfg: &mut Config) -> Result<()> {
         saved: false,
         term_width: 80,
         term_height: 24,
+        add_panel_available: Vec::new(),
+        add_panel_selected: 0,
+        add_panel_side: PanelFocus::Left,
     };
 
     let res = run_app(&mut terminal, &mut app);
@@ -422,6 +456,51 @@ fn handle_event(app: &mut App) -> Result<bool> {
                         }
                         KeyCode::Char(c) => {
                             app.editing_label_input.push(c);
+                        }
+                        _ => {}
+                    }
+                    return Ok(true);
+                }
+                InputMode::AddingPanel => {
+                    match key.code {
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            if app.add_panel_selected > 0 {
+                                app.add_panel_selected -= 1;
+                            }
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            if app.add_panel_selected + 1 < app.add_panel_available.len() {
+                                app.add_panel_selected += 1;
+                            }
+                        }
+                        KeyCode::Enter => {
+                            if app.add_panel_selected < app.add_panel_available.len() {
+                                let (key, icon, label) = app.add_panel_available[app.add_panel_selected];
+                                let field = config::FieldDef {
+                                    field: key.into(),
+                                    icon: icon.into(),
+                                    label: label.into(),
+                                    enabled: true,
+                                };
+                                let idx = match app.add_panel_side {
+                                    PanelFocus::Left => app.panel_left_state.selected().unwrap_or(0),
+                                    PanelFocus::Right => app.panel_right_state.selected().unwrap_or(0),
+                                };
+                                let fields = match app.add_panel_side {
+                                    PanelFocus::Left => &mut app.cfg.display.left,
+                                    PanelFocus::Right => &mut app.cfg.display.right,
+                                };
+                                let insert_at = idx.min(fields.len());
+                                fields.insert(insert_at, field);
+                                match app.add_panel_side {
+                                    PanelFocus::Left => app.panel_left_state.select(Some(insert_at)),
+                                    PanelFocus::Right => app.panel_right_state.select(Some(insert_at)),
+                                }
+                            }
+                            app.input_mode = InputMode::Normal;
+                        }
+                        KeyCode::Esc => {
+                            app.input_mode = InputMode::Normal;
                         }
                         _ => {}
                     }
@@ -722,6 +801,54 @@ fn handle_event(app: &mut App) -> Result<bool> {
                                         app.editing_label_index = idx;
                                         app.editing_label_input = fields[idx].label.clone();
                                         app.input_mode = InputMode::EditingLabel;
+                                    }
+                                }
+                                KeyCode::Char('a') => {
+                                    // Add a new panel field
+                                    let fields = match app.panel_focus {
+                                        PanelFocus::Left => &app.cfg.display.left,
+                                        PanelFocus::Right => &app.cfg.display.right,
+                                    };
+                                    let existing: std::collections::HashSet<&str> =
+                                        fields.iter().map(|f| f.field.as_str()).collect();
+                                    app.add_panel_available = ALL_FIELDS
+                                        .iter()
+                                        .filter(|(key, _, _)| !existing.contains(*key))
+                                        .copied()
+                                        .collect();
+                                    if !app.add_panel_available.is_empty() {
+                                        app.add_panel_selected = 0;
+                                        app.add_panel_side = app.panel_focus;
+                                        app.input_mode = InputMode::AddingPanel;
+                                    }
+                                }
+                                KeyCode::Char('d') => {
+                                    // Delete selected panel field
+                                    let idx = match app.panel_focus {
+                                        PanelFocus::Left => app.panel_left_state.selected(),
+                                        PanelFocus::Right => app.panel_right_state.selected(),
+                                    };
+                                    if let Some(i) = idx {
+                                        let fields = match app.panel_focus {
+                                            PanelFocus::Left => &mut app.cfg.display.left,
+                                            PanelFocus::Right => &mut app.cfg.display.right,
+                                        };
+                                        if i < fields.len() {
+                                            fields.remove(i);
+                                            let len = fields.len();
+                                            match app.panel_focus {
+                                                PanelFocus::Left => {
+                                                    app.panel_left_state.select(
+                                                        Some(i.min(len.saturating_sub(1))),
+                                                    );
+                                                }
+                                                PanelFocus::Right => {
+                                                    app.panel_right_state.select(
+                                                        Some(i.min(len.saturating_sub(1))),
+                                                    );
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                                 KeyCode::Enter | KeyCode::Right => {
@@ -1177,6 +1304,9 @@ fn render_ascii_selection(frame: &mut Frame, area: Rect, app: &mut App) {
         InputMode::BrowsingFile => {
             format!(" File browser: {}  ({} entries)", app.file_browser_cwd.display(), app.file_browser_entries.len())
         }
+        InputMode::AddingPanel => {
+            format!(" Add panel field ({} available)", app.add_panel_available.len())
+        }
     };
     let mode_widget = Paragraph::new(Span::raw(mode_text))
         .block(Block::default().borders(Borders::ALL).title("ASCII Art").border_type(BorderType::Rounded));
@@ -1294,6 +1424,19 @@ fn render_layout_selection(frame: &mut Frame, area: Rect, app: &mut App) {
 // ── Panel editor ─────────────────────────────────────────────────────────
 
 fn render_panel_editor(frame: &mut Frame, area: Rect, app: &mut App) {
+    // If adding a panel, show the field picker overlay
+    if app.input_mode == InputMode::AddingPanel {
+        let items: Vec<ListItem> = app.add_panel_available.iter().map(|(key, icon, label)| {
+            ListItem::new(format!(" {} ({}) {}", icon, key, label))
+        }).collect();
+        let list = List::new(items)
+            .block(Block::default().borders(Borders::ALL).title("Add Field").border_type(BorderType::Rounded))
+            .highlight_style(Style::default().bg(TuiColor::Rgb(60, 60, 80)));
+        let mut state = ListState::default().with_selected(Some(app.add_panel_selected));
+        frame.render_stateful_widget(list, area, &mut state);
+        return;
+    }
+
     // If editing a label, show the editor overlay
     if app.input_mode == InputMode::EditingLabel {
         let label = format!("Editing label: {}", app.editing_label_input);
@@ -1405,7 +1548,7 @@ fn render_preview(frame: &mut Frame, area: Rect, app: &App) {
         return;
     }
 
-    // Build a minimal SysInfo for preview
+// Build a minimal SysInfo for preview
     let info = info::SysInfo {
         os: "CachyOS".into(),
         host: "atlasbox".into(),
@@ -1426,6 +1569,9 @@ fn render_preview(frame: &mut Frame, area: Rect, app: &App) {
         resolution: String::new(),
         de: String::new(),
         font: String::new(),
+        vram: "8.0G".into(),
+        flatpak: "24".into(),
+        snap: "12".into(),
     };
 
     let preview_lines = render::render_preview(&app.cfg, &info, &app.current_ascii, area.width.saturating_sub(2));
@@ -1516,7 +1662,13 @@ fn render_footer(frame: &mut Frame, area: Rect, app: &App) {
                         "  [c]ustom  [p]aste  [d]isable".to_string()
                     }
                 }
-                Step::Panels => "  [Space] toggle  [r] reorder up  [e] edit label  [Tab] switch side".to_string(),
+                                Step::Panels => {
+                    if app.input_mode == InputMode::AddingPanel {
+                        "  [↑/↓] navigate  [Enter] add  [Esc] cancel".to_string()
+                    } else {
+                        "  [Space] toggle  [r] reorder up  [e] edit  [a] add  [d] delete  [Tab] switch".to_string()
+                    }
+                }
                 _ => String::new(),
             };
             format!(" {}  |  {}  {}", prev, next, extra)

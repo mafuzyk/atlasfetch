@@ -30,6 +30,9 @@ pub struct SysInfo {
     pub resolution: String,
     pub de: String,
     pub font: String,
+    pub vram: String,
+    pub flatpak: String,
+    pub snap: String,
 }
 
 impl SysInfo {
@@ -54,6 +57,9 @@ impl SysInfo {
             "resolution" => Some(&self.resolution),
             "de" => Some(&self.de),
             "font" => Some(&self.font),
+            "vram" => Some(&self.vram),
+            "flatpak" => Some(&self.flatpak),
+            "snap" => Some(&self.snap),
             _ => None,
         }
     }
@@ -81,6 +87,9 @@ pub fn collect() -> Result<SysInfo> {
     info.resolution = String::new();
     info.de = String::new();
     info.font = String::new();
+    info.vram = read_vram();
+    info.flatpak = count_flatpak();
+    info.snap = count_snap();
 
     Ok(info)
 }
@@ -592,6 +601,63 @@ fn count_packages() -> String {
         .sum();
 
     format!("{}", total)
+}
+
+// ── VRAM ─────────────────────────────────────────────────────────────────
+
+fn read_vram() -> String {
+    let drm_path = Path::new("/sys/class/drm");
+    if let Ok(entries) = fs::read_dir(drm_path) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if !name_str.starts_with("card") || name_str.contains("-") {
+                continue;
+            }
+            let vram_path = entry.path().join("device").join("mem_info_vram_total");
+            if let Ok(content) = fs::read_to_string(&vram_path) {
+                let bytes: u64 = content.trim().parse().unwrap_or(0);
+                if bytes > 0 {
+                    let gib = bytes as f64 / 1_073_741_824.0;
+                    return format!("{:.1}G", gib);
+                }
+            }
+        }
+    }
+    String::new()
+}
+
+// ── Flatpak count ────────────────────────────────────────────────────────
+
+fn count_flatpak() -> String {
+    if let Ok(out) = std::process::Command::new("flatpak")
+        .args(["list"])
+        .output()
+    {
+        if out.status.success() {
+            let count = String::from_utf8_lossy(&out.stdout).lines().count();
+            let count = count.saturating_sub(1);
+            if count > 0 {
+                return count.to_string();
+            }
+        }
+    }
+    String::new()
+}
+
+// ── Snap count ───────────────────────────────────────────────────────────
+
+fn count_snap() -> String {
+    if let Ok(out) = std::process::Command::new("snap").args(["list"]).output() {
+        if out.status.success() {
+            let count = String::from_utf8_lossy(&out.stdout).lines().count();
+            let count = count.saturating_sub(1);
+            if count > 0 {
+                return count.to_string();
+            }
+        }
+    }
+    String::new()
 }
 
 // ── Local IP ─────────────────────────────────────────────────────────────
