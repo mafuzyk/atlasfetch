@@ -136,8 +136,6 @@ pub struct App {
     pub current_ascii: String,
     // ASCII source for the setup flow
     pub ascii_source: AsciiSource,
-    // Custom ASCII file path input
-    pub custom_ascii_path: String,
     // Pasted ASCII input
     pub pasted_ascii: String,
     // Theme list state
@@ -185,7 +183,6 @@ pub enum PanelFocus {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum InputMode {
     Normal,
-    EditingCustomPath,
     EditingPastedAscii,
     EditingCustomPalette,
     EditingLabel,
@@ -245,7 +242,6 @@ pub fn run(cfg: &mut Config) -> Result<()> {
         logo_keys,
         current_ascii,
         ascii_source,
-        custom_ascii_path: String::new(),
         pasted_ascii: String::new(),
         theme_list_state,
         logo_list_state,
@@ -329,47 +325,6 @@ fn handle_event(app: &mut App) -> Result<bool> {
                 return Ok(true);
             }
             match app.input_mode {
-                InputMode::EditingCustomPath => {
-                    match key.code {
-                        KeyCode::Enter => {
-                            // Validate and load custom ASCII
-                            let path = app.custom_ascii_path.trim().to_string();
-                            if path.is_empty() {
-                                app.error_message = Some("Path cannot be empty.".into());
-                            } else {
-                                let expanded = shellexpand(&path);
-                                match std::fs::read_to_string(&expanded) {
-                                    Ok(content) if !content.trim().is_empty() => {
-                                        app.current_ascii = content.trim_end().to_string();
-                                        app.ascii_source = AsciiSource::CustomFile;
-                                        app.cfg.logo.key = String::new();
-                                        app.cfg.logo.path = path;
-                                        app.error_message = None;
-                                        app.input_mode = InputMode::Normal;
-                                    }
-                                    Ok(_) => {
-                                        app.error_message = Some("File is empty.".into());
-                                    }
-                                    Err(e) => {
-                                        app.error_message = Some(format!("Cannot read file: {}", e));
-                                    }
-                                }
-                            }
-                        }
-                        KeyCode::Esc => {
-                            app.input_mode = InputMode::Normal;
-                            app.error_message = None;
-                        }
-                        KeyCode::Backspace => {
-                            app.custom_ascii_path.pop();
-                        }
-                        KeyCode::Char(c) => {
-                            app.custom_ascii_path.push(c);
-                        }
-                        _ => {}
-                    }
-                    return Ok(true);
-                }
                 InputMode::EditingPastedAscii => {
                     match key.code {
                         KeyCode::Enter => {
@@ -1289,9 +1244,6 @@ fn render_ascii_selection(frame: &mut Frame, area: Rect, app: &mut App) {
                 AsciiSource::Disabled => "disabled",
             }
         ),
-        InputMode::EditingCustomPath => {
-            format!(" Enter file path: {}", app.custom_ascii_path)
-        }
         InputMode::EditingPastedAscii => {
             format!(" Paste ASCII (Enter to finish): {}", app.pasted_ascii)
         }
