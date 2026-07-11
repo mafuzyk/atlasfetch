@@ -203,6 +203,22 @@ The **Mod** key is the **Super / Windows** key (evdev 125).
 
 ---
 
+## atlasfetch
+
+A companion fetch tool with centered ASCII art and powerline panels, auto‑detecting your distro's logo and offering ~25 hand‑crafted color presets. Fully self‑contained — zero `pip` dependencies.
+
+> **Repository moved → [github.com/mafuzyk/atlasfetch](https://github.com/mafuzyk/atlasfetch)**
+
+```bash
+git clone https://github.com/mafuzyk/atlasfetch.git
+cp atlasfetch/atlasfetch ~/.local/bin/
+atlasfetch          # first run opens the interactive setup wizard
+```
+
+First run opens an interactive wizard (like hyfetch) where you pick a color palette and ASCII logo. Your config lives at `~/.config/atlasfetch/config.json`.
+
+---
+
 ## Why "Atlas"?
 
 Like the Titan who holds up the sky, Atlas holds your workspace — a potentially infinite canvas that doesn't constrain windows to the edges of physical displays.
