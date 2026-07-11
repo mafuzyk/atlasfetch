@@ -86,7 +86,7 @@ pub fn collect() -> Result<SysInfo> {
     info.local_ip = local_ip();
     info.resolution = String::new();
     info.de = String::new();
-    info.font = String::new();
+    info.font = detect_font();
     info.vram = read_vram();
     info.flatpak = count_flatpak();
     info.snap = count_snap();
@@ -690,6 +690,127 @@ fn get_addr_for_iface(name: &str) -> Result<String> {
         // Skip this for simplicity — returns empty, user can add later
     }
     Ok(String::new())
+}
+
+// ── Font ──────────────────────────────────────────────────────────────────
+
+fn detect_font() -> String {
+    // Try terminal-specific config files
+    let home = std::env::var("HOME").unwrap_or_default();
+
+    // Kitty
+    if let Ok(content) = fs::read_to_string(format!("{home}/.config/kitty/kitty.conf")) {
+        for line in content.lines() {
+            let line = line.trim();
+            if let Some(font) = line.strip_prefix("font_family ") {
+                return font.trim().trim_matches('"').to_string();
+            }
+        }
+    }
+
+    // Alacritty (YAML)
+    if let Ok(content) = fs::read_to_string(format!("{home}/.config/alacritty/alacritty.yml")) {
+        for line in content.lines() {
+            let line = line.trim();
+            if line.starts_with("family:") {
+                return line.strip_prefix("family:").unwrap().trim().trim_matches('"').to_string();
+            }
+        }
+    }
+    if let Ok(content) = fs::read_to_string(format!("{home}/.config/alacritty/alacritty.toml")) {
+        for line in content.lines() {
+            let line = line.trim();
+            if line.starts_with("family =") {
+                return line.strip_prefix("family =").unwrap().trim().trim_matches('"').to_string();
+            }
+        }
+    }
+
+    // WezTerm
+    if let Ok(content) = fs::read_to_string(format!("{home}/.config/wezterm/wezterm.lua")) {
+        for line in content.lines() {
+            let line = line.trim();
+            if line.contains("font = wezterm.font") || line.contains("font=") {
+                // Extract font name from wezterm.font("Font Name")
+                if let Some(start) = line.find('"') {
+                    if let Some(end) = line[start + 1..].find('"') {
+                        return line[start + 1..start + 1 + end].to_string();
+                    }
+                }
+                if let Some(start) = line.find('\'') {
+                    if let Some(end) = line[start + 1..].find('\'') {
+                        return line[start + 1..start + 1 + end].to_string();
+                    }
+                }
+            }
+        }
+    }
+
+    // Ghostty
+    if let Ok(content) = fs::read_to_string(format!("{home}/.config/ghostty/config")) {
+        for line in content.lines() {
+            let line = line.trim();
+            if let Some(font) = line.strip_prefix("font-family =") {
+                return font.trim().to_string();
+            }
+        }
+    }
+
+    // Foot
+    if let Ok(content) = fs::read_to_string(format!("{home}/.config/foot/foot.ini")) {
+        for line in content.lines() {
+            let line = line.trim();
+            if let Some(font) = line.strip_prefix("font=") {
+                return font.trim().to_string();
+            }
+        }
+    }
+
+    // Xresources / Xdefaults
+    for path in &[format!("{home}/.Xresources"), format!("{home}/.Xdefaults")] {
+        if let Ok(content) = fs::read_to_string(path) {
+            for line in content.lines() {
+                let line = line.trim();
+                if line.ends_with(".font:") || line.contains("*font:") {
+                    if let Some(font) = line.split(':').nth(1) {
+                        return font.trim().to_string();
+                    }
+                }
+            }
+        }
+    }
+
+    // GNOME Terminal (dconf/gsettings) - try gsettings
+    if let Ok(out) = std::process::Command::new("gsettings")
+        .args(["get", "org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:$(gsettings get org.gnome.Terminal.ProfilesList default | tr -d \"'\")/", "font"])
+        .output()
+    {
+        let font = String::from_utf8_lossy(&out.stdout).trim().trim_matches('\'').to_string();
+        if !font.is_empty() && font != "@as" {
+            return font;
+        }
+    }
+
+    // Konsole
+    if let Ok(content) = fs::read_to_string(format!("{home}/.config/konsolerc")) {
+        for line in content.lines() {
+            let line = line.trim();
+            if line.starts_with("Font=") {
+                return line.strip_prefix("Font=").unwrap().trim().to_string();
+            }
+        }
+    }
+
+    // Environment variables (some terminals set these)
+    for var in &["TERM_FONT", "FONT", "TERMINAL_FONT"] {
+        if let Ok(font) = std::env::var(var) {
+            if !font.is_empty() {
+                return font;
+            }
+        }
+    }
+
+    String::new()
 }
 
 #[cfg(test)]
