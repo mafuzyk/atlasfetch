@@ -945,13 +945,16 @@ fn select_logo(app: &mut App, index: usize) {
         let key = app.logo_keys[index].clone();
         app.ascii_source = AsciiSource::Builtin(key.clone());
         app.cfg.logo.key = key.clone();
-        // Load the ASCII art
+        // Try filesystem first, then embedded
         let dir = config::logo_dir().ok();
-        if let Some(dir) = dir {
-            let path = dir.join(&key);
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                app.current_ascii = content.trim_end().to_string();
-            }
+        let loaded = dir.and_then(|d| {
+            let path = d.join(&key);
+            std::fs::read_to_string(&path).ok()
+        });
+        if let Some(content) = loaded {
+            app.current_ascii = content.trim_end().to_string();
+        } else if let Some(art) = ascii::get_embedded(&key) {
+            app.current_ascii = art.trim_end_matches('\n').to_string();
         }
     }
 }

@@ -15,11 +15,18 @@ use crate::config;
 
 include!(concat!(env!("OUT_DIR"), "/logos_generated.rs"));
 
+fn filter_logo_keys(keys: &mut Vec<String>) {
+    keys.sort();
+    keys.retain(|k| !k.starts_with('.') && !k.ends_with("_small"));
+}
+
 /// All available built-in logo keys.
 pub fn available_logos() -> Result<Vec<String>> {
     let dir = config::logo_dir()?;
     if !dir.exists() {
-        return Ok(embedded_keys().iter().map(|s| s.to_string()).collect());
+        let mut keys: Vec<String> = embedded_keys().iter().map(|s| s.to_string()).collect();
+        filter_logo_keys(&mut keys);
+        return Ok(keys);
     }
     let mut keys: Vec<String> = fs::read_dir(&dir)?
         .flatten()
@@ -27,11 +34,11 @@ pub fn available_logos() -> Result<Vec<String>> {
         .map(|e| e.file_name().to_string_lossy().to_string())
         .collect();
     if keys.is_empty() {
-        return Ok(embedded_keys().iter().map(|s| s.to_string()).collect());
+        let mut keys: Vec<String> = embedded_keys().iter().map(|s| s.to_string()).collect();
+        filter_logo_keys(&mut keys);
+        return Ok(keys);
     }
-    keys.sort();
-    // Filter out _small variants (legacy) and hidden files
-    keys.retain(|k| !k.starts_with('.') && !k.ends_with("_small"));
+    filter_logo_keys(&mut keys);
     Ok(keys)
 }
 
