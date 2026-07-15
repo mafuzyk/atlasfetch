@@ -13,17 +13,22 @@ use std::path::PathBuf;
 
 use crate::config;
 
+include!(concat!(env!("OUT_DIR"), "/logos_generated.rs"));
+
 /// All available built-in logo keys.
 pub fn available_logos() -> Result<Vec<String>> {
     let dir = config::logo_dir()?;
     if !dir.exists() {
-        return Ok(Vec::new());
+        return Ok(embedded_keys().iter().map(|s| s.to_string()).collect());
     }
     let mut keys: Vec<String> = fs::read_dir(&dir)?
         .flatten()
         .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
         .map(|e| e.file_name().to_string_lossy().to_string())
         .collect();
+    if keys.is_empty() {
+        return Ok(embedded_keys().iter().map(|s| s.to_string()).collect());
+    }
     keys.sort();
     // Filter out _small variants (legacy) and hidden files
     keys.retain(|k| !k.starts_with('.') && !k.ends_with("_small"));
@@ -37,6 +42,10 @@ pub fn load(cfg: &config::Config) -> Result<String> {
         let dir = config::logo_dir()?;
         let path = dir.join(&cfg.logo.key);
         if let Ok(art) = fs::read_to_string(&path) {
+            return Ok(art.trim_end_matches('\n').to_string());
+        }
+        // Fall back to embedded logo
+        if let Some(art) = get_embedded(&cfg.logo.key) {
             return Ok(art.trim_end_matches('\n').to_string());
         }
     }
