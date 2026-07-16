@@ -873,12 +873,22 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
                 match editor.tab {
                     Tab::Mode => {
                         editor.mode_selected = editor.mode_selected.saturating_sub(1);
+                        let modes = DisplayMode::all();
+                        if editor.mode_selected < modes.len() {
+                            editor.display_mode = modes[editor.mode_selected];
+                            editor.dirty = true;
+                        }
                     }
                     Tab::Layout => {
                         editor.layout_selected = editor.layout_selected.saturating_sub(1);
+                        editor.apply_layout(editor.layout_selected);
                     }
                     Tab::Theme => {
                         editor.theme_selected = editor.theme_selected.saturating_sub(1);
+                        if editor.theme_selected < editor.themes.len() {
+                            editor.cfg.logo.colors = editor.themes[editor.theme_selected].colors.clone();
+                            editor.dirty = true;
+                        }
                     }
                     Tab::Ascii => {
                         editor.ascii_selected = editor.ascii_selected.saturating_sub(1);
@@ -898,14 +908,24 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
                     Tab::Mode => {
                         let max = DisplayMode::all().len().saturating_sub(1);
                         editor.mode_selected = (editor.mode_selected + 1).min(max);
+                        let modes = DisplayMode::all();
+                        if editor.mode_selected < modes.len() {
+                            editor.display_mode = modes[editor.mode_selected];
+                            editor.dirty = true;
+                        }
                     }
                     Tab::Layout => {
                         let max = AppLayout::pc_variants().len().saturating_sub(1);
                         editor.layout_selected = (editor.layout_selected + 1).min(max);
+                        editor.apply_layout(editor.layout_selected);
                     }
                     Tab::Theme => {
                         let max = editor.themes.len().saturating_sub(1);
                         editor.theme_selected = (editor.theme_selected + 1).min(max);
+                        if editor.theme_selected < editor.themes.len() {
+                            editor.cfg.logo.colors = editor.themes[editor.theme_selected].colors.clone();
+                            editor.dirty = true;
+                        }
                     }
                     Tab::Ascii => {
                         let max = editor.logo_keys.len() + 2; // builtins + file + paste + disable
