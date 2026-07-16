@@ -32,9 +32,13 @@ pub struct Config {
     pub display: DisplayConfig,
     #[serde(default)]
     pub palette: PaletteConfig,
+    #[serde(default = "default_scene")]
+    pub scene: String,
     #[serde(default)]
     pub custom_palettes: std::collections::HashMap<String, Vec<Color>>,
 }
+
+fn default_scene() -> String { "classic".into() }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogoConfig {
@@ -385,6 +389,7 @@ impl Config {
                 load: default_palette_load(),
                 processes: default_palette_processes(),
             },
+            scene: default_scene(),
             custom_palettes: std::collections::HashMap::new(),
         }
     }
@@ -425,6 +430,7 @@ impl Config {
                 load: default_palette_load(),
                 processes: default_palette_processes(),
             },
+            scene: default_scene(),
             custom_palettes: std::collections::HashMap::new(),
         }
     }

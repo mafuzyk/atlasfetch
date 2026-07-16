@@ -16,13 +16,15 @@ use crate::config;
 include!(concat!(env!("OUT_DIR"), "/logos_generated.rs"));
 
 fn clean_ascii(art: &str) -> String {
-    // Strip trailing whitespace and blank braille per line, then dedent common leading whitespace/braille
     let lines: Vec<String> = art.lines()
-        .map(|l| l.trim_end().trim_end_matches('\u{2800}').to_string())
+        .map(|l| {
+            l.replace('\u{2800}', " ")
+        })
+        .map(|l| l.trim_end().to_string())
         .collect();
     let min_lead = lines.iter()
         .filter(|l| !l.trim().is_empty())
-        .map(|l| l.chars().take_while(|c| *c == ' ' || *c == '\u{2800}').count())
+        .map(|l| l.chars().take_while(|c| *c == ' ').count())
         .min()
         .unwrap_or(0);
     if min_lead == 0 {

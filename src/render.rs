@@ -28,6 +28,7 @@ pub struct StyledSegment {
 // ── Terminal output ──────────────────────────────────────────────────────
 
 /// Render the full fetch output as an ANSI string for terminal display.
+#[allow(dead_code)]
 pub fn render(cfg: &Config, info: &SysInfo, ascii_art: &str) -> Result<String> {
     let term_width = terminal_width();
     let mut out = String::new();
@@ -471,6 +472,7 @@ fn visible_of_segs(segs: &[StyledSegment]) -> usize {
 }
 
 /// Cascade offset for panel staggering.
+#[allow(dead_code)]
 fn cascade_offset(i: usize, total: usize, max_shift: usize) -> usize {
     if total <= 1 {
         return 0;
@@ -514,6 +516,7 @@ fn visible_width(s: &str) -> usize {
 }
 
 /// Trim an ANSI string so its visible width doesn't exceed `max_width`.
+#[allow(dead_code)]
 fn trim_to_width(s: &str, max_width: usize) -> String {
     let mut out = String::new();
     let mut vis = 0;

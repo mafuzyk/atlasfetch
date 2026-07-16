@@ -33,4 +33,8 @@ pub struct Args {
     /// Print only the ASCII art (centered, colored), no system info
     #[arg(long = "just-ascii")]
     pub just_ascii: bool,
+
+    /// Scene/layout: classic, dashboard, cockpit, split
+    #[arg(long = "scene")]
+    pub scene: Option<String>,
 }

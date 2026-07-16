@@ -7,6 +7,7 @@
 
 mod ascii;
 mod cli;
+mod component;
 mod config;
 mod info;
 mod layout;
@@ -200,6 +201,33 @@ fn main() -> Result<()> {
         }
     }
 
+    // --scene: override scene
+    if let Some(ref s) = args.scene {
+        let scene = match s.as_str() {
+            "classic" => component::Scene::Classic,
+            "dashboard" => component::Scene::Dashboard,
+            "cockpit" => component::Scene::Cockpit,
+            "split" | "split-monitor" => component::Scene::SplitMonitor,
+            _ => {
+                eprintln!("Unknown scene '{}'. Available: classic, dashboard, cockpit, split", s);
+                return Ok(());
+            }
+        };
+        ascii::ensure_logos()?;
+        let cfg = config::Config::load()?;
+        let info = info::collect()?;
+        let ascii_art = ascii::load(&cfg)?;
+        let tw = layout::terminal_width();
+        let ctx = component::RenderCtx { info: &info, cfg: &cfg, term_width: tw, palette: &cfg.logo.colors };
+        use component::Component;
+        let ascii_comp = component::ascii::AsciiComponent::new(ascii_art.clone());
+        let system_comp = component::system::SystemComponent;
+        let monitor_comp = component::monitor::MonitorComponent;
+        let comps: Vec<&dyn Component> = vec![&ascii_comp, &system_comp, &monitor_comp];
+        print!("{}", component::render_scene_ansi(scene, &comps, &ctx));
+        return Ok(());
+    }
+
     // --just-ascii: print only the ASCII art
     if args.just_ascii {
         ascii::ensure_logos()?;
@@ -234,12 +262,31 @@ fn main() -> Result<()> {
     let term_width = layout::terminal_width();
     let is_mobile = info::is_android() || term_width < 80;
 
+    let scene = match cfg.scene.as_str() {
+        "dashboard" => component::Scene::Dashboard,
+        "cockpit" => component::Scene::Cockpit,
+        "split" | "split-monitor" => component::Scene::SplitMonitor,
+        _ => component::Scene::Classic,
+    };
+
+    let ctx = component::RenderCtx {
+        info: &info,
+        cfg: &cfg,
+        term_width,
+        palette: &cfg.logo.colors,
+    };
+
     let output = if is_mobile && term_width < 55 {
         render::render_mobile(&cfg, &info, &ascii_art, true)?
     } else if is_mobile {
         render::render_mobile(&cfg, &info, &ascii_art, false)?
     } else {
-        render::render(&cfg, &info, &ascii_art)?
+        use component::Component;
+        let ascii_comp = component::ascii::AsciiComponent::new(ascii_art.clone());
+        let system_comp = component::system::SystemComponent;
+        let monitor_comp = component::monitor::MonitorComponent;
+        let components: Vec<&dyn Component> = vec![&ascii_comp, &system_comp, &monitor_comp];
+        component::render_scene_ansi(scene, &components, &ctx)
     };
 
     print!("{}", output);
