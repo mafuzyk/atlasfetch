@@ -16,22 +16,12 @@ use crate::config;
 include!(concat!(env!("OUT_DIR"), "/logos_generated.rs"));
 
 fn clean_ascii(art: &str) -> String {
-    let lines: Vec<String> = art.lines()
-        .map(|l| {
-            l.replace('\u{2800}', " ")
-        })
+    art.lines()
+        .map(|l| l.replace('\u{2800}', " "))
+        .map(|l| l.trim_start().to_string())
         .map(|l| l.trim_end().to_string())
-        .collect();
-    let min_lead = lines.iter()
-        .filter(|l| !l.trim().is_empty())
-        .map(|l| l.chars().take_while(|c| *c == ' ').count())
-        .min()
-        .unwrap_or(0);
-    if min_lead == 0 {
-        lines.join("\n")
-    } else {
-        lines.iter().map(|l| l.chars().skip(min_lead).collect::<String>()).collect::<Vec<_>>().join("\n")
-    }
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn filter_logo_keys(keys: &mut Vec<String>) {

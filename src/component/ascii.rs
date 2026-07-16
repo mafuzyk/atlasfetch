@@ -45,8 +45,7 @@ impl Component for AsciiComponent {
         for (i, line) in lines.iter().enumerate() {
             let mut spans = Vec::new();
             if center > 0 { spans.push(StyledSpan::new(" ".repeat(center))); }
-            let padded = format!("{:w$}", line, w = max_w);
-            for (ci, ch) in padded.chars().enumerate() {
+            for (ci, ch) in line.chars().enumerate() {
                 let flag_c = crate::theme::flag_color_at(cols, i, ci, total, max_w, false);
                 let color = flag_c.unwrap_or_else(|| {
                     let idx = if is_vert { ci } else { i };
@@ -58,6 +57,11 @@ impl Component for AsciiComponent {
                 } else {
                     spans.push(StyledSpan::new(" "));
                 }
+            }
+            let row_w: usize = spans.iter().map(|s| s.text.width()).sum();
+            let need = center + max_w;
+            if row_w < need {
+                spans.push(StyledSpan::new(" ".repeat(need - row_w)));
             }
             result.push(spans);
         }
