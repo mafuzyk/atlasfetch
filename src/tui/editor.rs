@@ -219,18 +219,20 @@ impl Editor {
         };
         let engine = layout_engine::engine_for(engine_layout);
 
-        let enabled_fields: Vec<FieldDef> = self.cfg.display.left.iter()
-            .chain(self.cfg.display.right.iter())
-            .filter(|f| f.enabled)
-            .cloned()
-            .collect();
-
         let mut reg = Registry::new();
-        for fd in &enabled_fields {
-            reg.register(Box::new(FieldWidget::from_def(fd.clone())));
+        for fd in self.cfg.display.left.iter().chain(self.cfg.display.right.iter()) {
+            if fd.enabled {
+                reg.register(Box::new(FieldWidget::from_def(fd.clone())));
+            }
         }
 
-        let widgets: Vec<&dyn Widget> = enabled_fields.iter()
+        let left_widgets: Vec<&dyn Widget> = self.cfg.display.left.iter()
+            .filter(|f| f.enabled)
+            .filter_map(|fd| reg.get(&fd.field))
+            .collect();
+
+        let right_widgets: Vec<&dyn Widget> = self.cfg.display.right.iter()
+            .filter(|f| f.enabled)
             .filter_map(|fd| reg.get(&fd.field))
             .collect();
 
@@ -241,7 +243,7 @@ impl Editor {
             Vec::new()
         };
 
-        let output = engine.arrange(&widgets, &ascii_lines, &self.cfg, &self.info, tw);
+        let output = engine.arrange(&left_widgets, &right_widgets, &ascii_lines, &self.cfg, &self.info, tw);
 
         let mut lines: Vec<Line> = Vec::new();
         let title_color = tui_color(&Color::from_hex_opt(&self.cfg.title.color).unwrap_or(Color::new(255, 154, 152)));
@@ -254,20 +256,62 @@ impl Editor {
         }
 
         let logo_width = ascii_lines.iter().map(|l| l.trim_end().width()).max().unwrap_or(0);
+        let logo_origin = if logo_width > 0 && logo_width < tw {
+            (tw.saturating_sub(logo_width)) / 2
+        } else {
+            0
+        };
+
         for row in &output.rows {
             let mut spans: Vec<Span> = Vec::new();
-            if let Some(logo) = &row.logo_line {
-                let center = tw.saturating_sub(logo_width) / 2;
-                if center > 0 { spans.push(Span::raw(" ".repeat(center))); }
-                spans.push(Span::raw(logo.clone()));
+
+            let right_vis = row.right_widgets.iter().map(|w| w.width).sum::<usize>();
+            let has_logo = row.logo_line.is_some();
+
+            if has_logo {
+                // Left widgets before logo
+                for w in &row.left_widgets {
+                    spans.extend(styled_to_spans(&w.styled));
+                }
+                // Gap to logo center
+                let cur: usize = spans.iter().map(|s| s.content.width()).sum();
+                if logo_origin > cur {
+                    spans.push(Span::raw(" ".repeat(logo_origin - cur)));
+                }
+                // Logo
+                if let Some(logo) = &row.logo_line {
+                    spans.push(Span::raw(logo.clone()));
+                }
+                // Gap from logo end to right widgets
+                let cur: usize = spans.iter().map(|s| s.content.width()).sum();
+                let right_target = tw.saturating_sub(right_vis);
+                if right_target > cur {
+                    spans.push(Span::raw(" ".repeat(right_target - cur)));
+                }
+                for w in &row.right_widgets {
+                    spans.extend(styled_to_spans(&w.styled));
+                }
+            } else {
+                // No logo: left widgets on left, right widgets on right
+                for w in &row.left_widgets {
+                    spans.extend(styled_to_spans(&w.styled));
+                }
+                let cur: usize = spans.iter().map(|s| s.content.width()).sum();
+                let right_target = tw.saturating_sub(right_vis);
+                if right_target > cur {
+                    spans.push(Span::raw(" ".repeat(right_target - cur)));
+                }
+                for w in &row.right_widgets {
+                    spans.extend(styled_to_spans(&w.styled));
+                }
             }
-            for w in &row.left_widgets { spans.extend(styled_to_spans(&w.styled)); }
-            for w in &row.right_widgets {
-                let span_width: usize = spans.iter().map(|s| s.content.width()).sum();
-                let rem = tw.saturating_sub(span_width + w.width);
-                if rem > 0 { spans.push(Span::raw(" ".repeat(rem))); }
-                spans.extend(styled_to_spans(&w.styled));
+
+            // Pad to full width
+            let cur: usize = spans.iter().map(|s| s.content.width()).sum();
+            if cur < tw {
+                spans.push(Span::raw(" ".repeat(tw - cur)));
             }
+
             if !spans.is_empty() {
                 lines.push(Line::from(spans));
             }

@@ -81,7 +81,8 @@ pub trait LayoutEngine {
 
     fn arrange(
         &self,
-        widgets: &[&dyn Widget],
+        left_widgets: &[&dyn Widget],
+        right_widgets: &[&dyn Widget],
         ascii_lines: &[String],
         cfg: &crate::config::Config,
         info: &crate::info::SysInfo,
@@ -99,7 +100,8 @@ impl LayoutEngine for ClassicLayout {
 
     fn arrange(
         &self,
-        widgets: &[&dyn Widget],
+        left_widgets: &[&dyn Widget],
+        right_widgets: &[&dyn Widget],
         ascii_lines: &[String],
         cfg: &crate::config::Config,
         info: &crate::info::SysInfo,
@@ -115,7 +117,7 @@ impl LayoutEngine for ClassicLayout {
             .max()
             .unwrap_or(0);
 
-        let n = widgets.len();
+        let n = left_widgets.len().max(right_widgets.len());
         let lh = ascii_lines.len();
 
         // Check if the ASCII fits
@@ -152,28 +154,31 @@ impl LayoutEngine for ClassicLayout {
                 None
             };
 
-            let mut left_widgets = Vec::new();
-            let mut right_widgets = Vec::new();
+            let mut left_parts = Vec::new();
+            let mut right_parts = Vec::new();
 
             if in_range {
                 let idx = if lh > 0 { i.saturating_sub(start_row) } else { i };
-                if let Some(w) = widgets.get(idx) {
+                // Left widget
+                if let Some(w) = left_widgets.get(idx) {
                     let color = cfg.logo.colors.get(idx).copied().unwrap_or(Color::new(255, 255, 255));
                     let left_avail = logo_origin.saturating_sub(left_pad + shift + gap).max(4);
                     let ctx = RenderCtx { info, panel_cfg: &cfg.panel, max_width: left_avail, fg_color: color };
-                    left_widgets.push(w.render(&ctx));
-
+                    left_parts.push(w.render(&ctx));
+                }
+                // Right widget
+                if let Some(w) = right_widgets.get(idx) {
                     let right_color = cfg.logo.colors.get((idx + 3) % cfg.logo.colors.len())
                         .copied().unwrap_or(Color::new(255, 255, 255));
                     let right_avail = term_width
                         .saturating_sub(logo_origin + logo_width + gap + right_pad + max_shift)
                         .max(4);
                     let ctx = RenderCtx { info, panel_cfg: &cfg.panel, max_width: right_avail, fg_color: right_color };
-                    right_widgets.push(w.render(&ctx));
+                    right_parts.push(w.render(&ctx));
                 }
             }
 
-            rows.push(LayoutRow { left_widgets, logo_line, right_widgets });
+            rows.push(LayoutRow { left_widgets: left_parts, logo_line, right_widgets: right_parts });
         }
 
         LayoutOutput {
@@ -194,7 +199,8 @@ impl LayoutEngine for StackLayout {
 
     fn arrange(
         &self,
-        widgets: &[&dyn Widget],
+        left_widgets: &[&dyn Widget],
+        _right_widgets: &[&dyn Widget],
         ascii_lines: &[String],
         cfg: &crate::config::Config,
         info: &crate::info::SysInfo,
@@ -232,7 +238,7 @@ impl LayoutEngine for StackLayout {
         });
 
         // Widget rows
-        for (i, w) in widgets.iter().enumerate() {
+        for (i, w) in left_widgets.iter().enumerate() {
             let color = cfg.logo.colors.get(i).copied().unwrap_or(Color::new(255, 255, 255));
             let avail = term_width.saturating_sub(pad * 2).max(10);
             let ctx = RenderCtx { info, panel_cfg: &cfg.panel, max_width: avail, fg_color: color };
@@ -261,7 +267,8 @@ impl LayoutEngine for MinimalLayout {
 
     fn arrange(
         &self,
-        widgets: &[&dyn Widget],
+        left_widgets: &[&dyn Widget],
+        _right_widgets: &[&dyn Widget],
         _ascii_lines: &[String],
         cfg: &crate::config::Config,
         info: &crate::info::SysInfo,
@@ -270,7 +277,7 @@ impl LayoutEngine for MinimalLayout {
         let pad = cfg.panel.left_pad;
         let mut rows = Vec::new();
 
-        for (i, w) in widgets.iter().enumerate() {
+        for (i, w) in left_widgets.iter().enumerate() {
             let color = cfg.logo.colors.get(i).copied().unwrap_or(Color::new(255, 255, 255));
             let avail = term_width.saturating_sub(pad * 2).max(10);
             let ctx = RenderCtx { info, panel_cfg: &cfg.panel, max_width: avail, fg_color: color };
@@ -299,7 +306,8 @@ impl LayoutEngine for CompactLayout {
 
     fn arrange(
         &self,
-        widgets: &[&dyn Widget],
+        left_widgets: &[&dyn Widget],
+        _right_widgets: &[&dyn Widget],
         _ascii_lines: &[String],
         cfg: &crate::config::Config,
         info: &crate::info::SysInfo,
@@ -308,7 +316,7 @@ impl LayoutEngine for CompactLayout {
         let pad = 1; // tighter padding
         let mut rows = Vec::new();
 
-        for (i, w) in widgets.iter().enumerate() {
+        for (i, w) in left_widgets.iter().enumerate() {
             let color = cfg.logo.colors.get(i).copied().unwrap_or(Color::new(255, 255, 255));
             let avail = term_width.saturating_sub(pad * 2).max(10);
             let ctx = RenderCtx { info, panel_cfg: &cfg.panel, max_width: avail, fg_color: color };
