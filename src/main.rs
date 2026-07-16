@@ -223,7 +223,8 @@ fn main() -> Result<()> {
         let ascii_comp = component::ascii::AsciiComponent::new(ascii_art.clone());
         let system_comp = component::system::SystemComponent;
         let monitor_comp = component::monitor::MonitorComponent::new();
-        let comps: Vec<&dyn Component> = vec![&ascii_comp, &system_comp, &monitor_comp];
+        let companion_comp = component::companion::CompanionComponent;
+        let comps: Vec<&dyn Component> = vec![&ascii_comp, &system_comp, &monitor_comp, &companion_comp];
         print!("{}", component::render_scene_ansi(scene, &comps, &ctx));
         return Ok(());
     }
@@ -260,7 +261,7 @@ fn main() -> Result<()> {
     let ascii_art = ascii::load(&cfg)?;
 
     let term_width = layout::terminal_width();
-    let is_mobile = info::is_android() || term_width < 80;
+    let is_mobile = info::is_android();
 
     let scene = match cfg.scene.as_str() {
         "dashboard" => component::Scene::Dashboard,

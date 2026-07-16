@@ -160,29 +160,29 @@ pub fn collect() -> Result<SysInfo> {
     info.packages = count_packages();
     info.local_ip = local_ip();
     info.resolution = detect_resolution();
-    info.de = String::new();
+    info.de = detect_de();
     info.font = detect_font();
     info.vram = read_vram();
     info.flatpak = count_flatpak();
     info.snap = count_snap();
     info.arch = read_arch();
     info.soc = read_cpu();
+    info.device = read_device_model();
+    info.battery_level = read_battery_level();
+    info.battery_temp = read_battery_temp();
+    info.battery_health = read_battery_health();
+    info.battery_status = read_battery_status();
+    info.cpu_temp = read_cpu_temp();
+    info.brightness = read_brightness();
+    info.refresh_rate = read_refresh_rate();
+    info.signal = read_signal();
+    info.wifi_ssid = read_wifi_ssid();
     if is_android() {
-        info.device = read_device_model();
         info.rom = read_rom();
-        info.battery_level = read_battery_level();
-        info.battery_temp = read_battery_temp();
-        info.battery_health = read_battery_health();
-        info.battery_status = read_battery_status();
         info.root_status = detect_root();
         info.bootloader = read_bootloader();
         info.selinux = read_selinux();
         info.storage = format_android_storage();
-        info.cpu_temp = read_cpu_temp();
-        info.brightness = read_brightness();
-        info.refresh_rate = read_refresh_rate();
-        info.signal = read_signal();
-        info.wifi_ssid = read_wifi_ssid();
         info.security_patch = read_security_patch();
     }
     info.uptime_days = info.uptime.clone();
@@ -700,6 +700,60 @@ fn detect_wm() -> String {
     "unknown".into()
 }
 
+// ── Desktop Environment ─────────────────────────────────────────────────
+
+fn detect_de() -> String {
+    // Check known DE-specific env vars in priority order
+    if let Ok(val) = std::env::var("XDG_CURRENT_DESKTOP") {
+        let de = val.trim().to_string();
+        if !de.is_empty() { return de; }
+    }
+    if let Ok(val) = std::env::var("DESKTOP_SESSION") {
+        let de = val.trim().to_string();
+        if !de.is_empty() { return de; }
+    }
+    if std::env::var("GNOME_DESKTOP_SESSION_ID").is_ok() {
+        return "GNOME".into();
+    }
+    if std::env::var("MATE_DESKTOP_SESSION_ID").is_ok() {
+        return "MATE".into();
+    }
+    if std::env::var("KDE_FULL_SESSION").is_ok() {
+        return "KDE".into();
+    }
+    // Detect via process name matching (same approach as detect_wm)
+    let de_procs = &[
+        "gnome-shell", "plasmashell", "xfce4-session", "mate-session",
+        "lxqt-session", "lxpanel", "cinnamon-session", "budgie-wm",
+        "deepin-wm", "enlightenment", "openbox", "fluxbox", "i3",
+    ];
+    if let Ok(proc) = fs::read_dir("/proc") {
+        for entry in proc.flatten() {
+            let pid = entry.file_name();
+            let pid_str = pid.to_string_lossy();
+            if let Ok(comm) = fs::read_to_string(format!("/proc/{}/comm", pid_str)) {
+                let comm = comm.trim();
+                if de_procs.contains(&comm) {
+                    match comm {
+                        "gnome-shell" => return "GNOME".into(),
+                        "plasmashell" => return "KDE".into(),
+                        "xfce4-session" => return "Xfce".into(),
+                        "mate-session" => return "MATE".into(),
+                        "lxqt-session" => return "LXQt".into(),
+                        "lxpanel" => return "LXDE".into(),
+                        "cinnamon-session" => return "Cinnamon".into(),
+                        "budgie-wm" => return "Budgie".into(),
+                        "deepin-wm" => return "Deepin".into(),
+                        "enlightenment" => return "Enlightenment".into(),
+                        _ => return comm.to_string(),
+                    }
+                }
+            }
+        }
+    }
+    String::new()
+}
+
 // ── Load ─────────────────────────────────────────────────────────────────
 
 fn read_load() -> String {
@@ -1022,33 +1076,20 @@ fn detect_resolution() -> String {
 // ── Local IP ─────────────────────────────────────────────────────────────
 
 fn local_ip() -> String {
-    // Find the first non-loopback IPv4 address
-    if let Ok(entries) = fs::read_dir("/sys/class/net") {
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            if name == "lo" {
-                continue;
-            }
-            // Try to get address via /proc/net/fib_trie or /proc/net/route
-            // Simple approach: skip, this is best-effort
-            if let Ok(addr) = get_addr_for_iface(&name) {
-                if !addr.is_empty() {
-                    return addr;
-                }
-            }
-        }
+    // Connect to a public DNS to discover our local IP.
+    // This sends a UDP packet but is the most portable approach.
+    use std::net::UdpSocket;
+    let sock = match UdpSocket::bind("0.0.0.0:0") {
+        Ok(s) => s,
+        Err(_) => return String::new(),
+    };
+    if sock.connect("8.8.8.8:80").is_err() {
+        return String::new();
     }
-    String::new()
-}
-
-fn get_addr_for_iface(name: &str) -> Result<String> {
-    let addr_path = format!("/sys/class/net/{}/address", name);
-    if let Ok(_mac) = fs::read_to_string(&addr_path) {
-        // We'd need an actual method to get IP. For now try via /proc/net/fib_trie
-        // Skip this for simplicity — returns empty, user can add later
+    match sock.local_addr() {
+        Ok(addr) => addr.ip().to_string(),
+        Err(_) => String::new(),
     }
-    Ok(String::new())
 }
 
 // ── Font ──────────────────────────────────────────────────────────────────
@@ -1184,6 +1225,16 @@ fn read_arch() -> String {
 }
 
 fn read_device_model() -> String {
+    // PC: DMI product name
+    for dmi in &["/sys/class/dmi/id/product_name", "/sys/devices/virtual/dmi/id/product_name"] {
+        if let Ok(content) = fs::read_to_string(dmi) {
+            let name = content.trim().to_string();
+            if !name.is_empty() && name != "System Product Name" && name != "To Be Filled By O.E.M." {
+                return name;
+            }
+        }
+    }
+    // Android: getprop
     if let Ok(out) = std::process::Command::new("getprop").arg("ro.product.model").output() {
         if out.status.success() {
             let model = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -1221,21 +1272,25 @@ fn read_rom() -> String {
 }
 
 fn read_battery_level() -> String {
-    let path = Path::new("/sys/class/power_supply/battery/capacity");
-    if let Ok(content) = fs::read_to_string(path) {
-        let level = content.trim().to_string();
-        if !level.is_empty() {
-            return format!("{}%", level);
+    for psu in &["/sys/class/power_supply/BAT0", "/sys/class/power_supply/battery"] {
+        let cap = Path::new(psu).join("capacity");
+        if let Ok(content) = fs::read_to_string(&cap) {
+            let level = content.trim().to_string();
+            if !level.is_empty() {
+                return format!("{}%", level);
+            }
         }
     }
     String::new()
 }
 
 fn read_battery_temp() -> String {
-    let path = Path::new("/sys/class/power_supply/battery/temp");
-    if let Ok(content) = fs::read_to_string(path) {
-        if let Ok(raw) = content.trim().parse::<f64>() {
-            return format!("{:.0}°C", raw / 10.0);
+    for psu in &["/sys/class/power_supply/BAT0", "/sys/class/power_supply/battery"] {
+        let temp_path = Path::new(psu).join("temp");
+        if let Ok(content) = fs::read_to_string(&temp_path) {
+            if let Ok(raw) = content.trim().parse::<f64>() {
+                return format!("{:.0}°C", raw / 10.0);
+            }
         }
     }
     // Alternative: thermal zone
@@ -1255,18 +1310,23 @@ fn read_battery_temp() -> String {
 }
 
 fn read_battery_health() -> String {
-    let path = Path::new("/sys/class/power_supply/battery/health");
-    if let Ok(content) = fs::read_to_string(path) {
-        let h = content.trim().to_string();
-        if !h.is_empty() && h != "Unknown" { return h; }
+    for psu in &["/sys/class/power_supply/BAT0", "/sys/class/power_supply/battery"] {
+        let health_path = Path::new(psu).join("health");
+        if let Ok(content) = fs::read_to_string(&health_path) {
+            let h = content.trim().to_string();
+            if !h.is_empty() && h != "Unknown" { return h; }
+        }
     }
     String::new()
 }
 
 fn read_battery_status() -> String {
-    let path = Path::new("/sys/class/power_supply/battery/status");
-    if let Ok(content) = fs::read_to_string(path) {
-        return content.trim().to_string();
+    for psu in &["/sys/class/power_supply/BAT0", "/sys/class/power_supply/battery"] {
+        let status_path = Path::new(psu).join("status");
+        if let Ok(content) = fs::read_to_string(&status_path) {
+            let s = content.trim().to_string();
+            if !s.is_empty() { return s; }
+        }
     }
     String::new()
 }
@@ -1420,15 +1480,19 @@ fn read_brightness() -> String {
 }
 
 fn read_refresh_rate() -> String {
-    // Try display hal
-    for path in &["/sys/class/drm/card0-DSI-1/modes", "/sys/class/drm/card0-eDP-1/modes",
-                  "/sys/class/drm/card1-DSI-1/modes", "/sys/class/drm/card1-eDP-1/modes"] {
-        if let Ok(content) = fs::read_to_string(path) {
-            for mode in content.lines() {
-                let parts: Vec<&str> = mode.split_whitespace().collect();
-                if let Some(last) = parts.last() {
-                    if let Ok(hz) = last.parse::<f64>() {
-                        return format!("{:.0}Hz", hz);
+    // Scan DRM connectors dynamically
+    if let Ok(entries) = fs::read_dir("/sys/class/drm") {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !name.contains('-') { continue; }
+            let modes_path = entry.path().join("modes");
+            if let Ok(content) = fs::read_to_string(&modes_path) {
+                for mode in content.lines() {
+                    let parts: Vec<&str> = mode.split_whitespace().collect();
+                    if let Some(last) = parts.last() {
+                        if let Ok(hz) = last.parse::<f64>() {
+                            return format!("{:.0}Hz", hz);
+                        }
                     }
                 }
             }

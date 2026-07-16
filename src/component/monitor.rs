@@ -136,15 +136,26 @@ fn read_live_mem_pct() -> f64 {
 }
 
 fn read_live_gpu_pct() -> f64 {
+    // 1. AMD/Intel via sysfs gpu_busy_percent (amdgpu, i915, xe)
     let drm = Path::new("/sys/class/drm");
-    let entries = match fs::read_dir(drm) {
-        Ok(e) => e,
-        Err(_) => return 0.0,
-    };
-    for entry in entries.flatten() {
-        let path = entry.path().join("device").join("gpu_busy_percent");
-        if let Ok(content) = fs::read_to_string(&path) {
-            if let Ok(v) = content.trim().parse::<f64>() {
+    if let Ok(entries) = fs::read_dir(drm) {
+        for entry in entries.flatten() {
+            let path = entry.path().join("device").join("gpu_busy_percent");
+            if let Ok(content) = fs::read_to_string(&path) {
+                if let Ok(v) = content.trim().parse::<f64>() {
+                    if v > 0.0 { return (v / 100.0).min(1.0); }
+                }
+            }
+        }
+    }
+    // 2. NVIDIA via nvidia-smi
+    if let Ok(out) = std::process::Command::new("nvidia-smi")
+        .args(["--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"])
+        .output()
+    {
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout);
+            if let Ok(v) = s.trim().parse::<f64>() {
                 return (v / 100.0).min(1.0);
             }
         }
@@ -227,15 +238,10 @@ impl Component for MonitorComponent {
         let mem_pct = read_live_mem_pct();
         lines.push(render_bar("RAM", mem_pct, bar_w, Color::new(157, 133, 255)));
 
-        // GPU — live from sysfs gpu_busy_percent
+        // GPU — live from sysfs/nvidia-smi
         let gpu_pct = read_live_gpu_pct();
         if gpu_pct > 0.0 {
             lines.push(render_bar("GPU", gpu_pct, bar_w, Color::new(255, 184, 131)));
-        } else {
-            // fallback: estimate from loadavg
-            let load = read_stat().map(|(t, _)| t as f64).unwrap_or(0.0);
-            let est = if load > 0.0 { (load * 0.0001).min(1.0) } else { 0.0 };
-            lines.push(render_bar("GPU", est, bar_w, Color::new(255, 184, 131)));
         }
 
         // Temperature — live from thermal zones
