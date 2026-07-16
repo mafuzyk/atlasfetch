@@ -323,8 +323,9 @@ impl Editor {
             0
         };
         let logo_colors = &self.cfg.logo.colors;
+        let is_vert = self.cfg.logo.color_dir == "vertical";
 
-        for row in &output.rows {
+        for (ri, row) in output.rows.iter().enumerate() {
             let mut spans: Vec<Span> = Vec::new();
 
             let right_vis = row.right_widgets.iter().map(|w| w.width).sum::<usize>();
@@ -340,7 +341,8 @@ impl Editor {
                 }
                 if let Some(logo) = &row.logo_line {
                     for (ci, ch) in logo.chars().enumerate() {
-                        let c = logo_colors.get(ci % logo_colors.len().max(1)).copied().unwrap_or(Color::new(255, 255, 255));
+                        let idx = if is_vert { ci } else { ri };
+                        let c = logo_colors.get(idx % logo_colors.len().max(1)).copied().unwrap_or(Color::new(255, 255, 255));
                         if ch != ' ' {
                             spans.push(Span::styled(ch.to_string(), Style::default().fg(tui_color(&c))));
                         } else {
@@ -589,7 +591,7 @@ fn render_layout_tab(frame: &mut Frame, area: Rect, editor: &Editor) {
 // ── Theme tab ────────────────────────────────────────────────────────────
 
 fn render_theme_tab(frame: &mut Frame, area: Rect, editor: &Editor) {
-    let top = ratatui::layout::Layout::vertical([Constraint::Fill(1), Constraint::Length(4)]).split(area);
+    let top = ratatui::layout::Layout::vertical([Constraint::Fill(1), Constraint::Length(4), Constraint::Length(3)]).split(area);
 
     let items: Vec<ListItem> = editor.themes.iter().enumerate().map(|(i, t)| {
         let swatch: Vec<Span> = t.colors.iter().map(|c| Span::styled("  ", Style::default().bg(tui_color(c)))).collect();
@@ -604,6 +606,9 @@ fn render_theme_tab(frame: &mut Frame, area: Rect, editor: &Editor) {
 
     let swatch: Vec<Span> = editor.cfg.logo.colors.iter().map(|c| Span::styled("  ", Style::default().bg(tui_color(c)))).collect();
     frame.render_widget(Paragraph::new(Line::from(swatch)).block(Block::default().title("Current Palette").borders(Borders::ALL).border_type(BorderType::Rounded).border_style(Style::default().fg(TuiColor::Rgb(255, 154, 152)))), top[1]);
+
+    let dir_label = if editor.cfg.logo.color_dir == "vertical" { "Vertical" } else { "Horizontal" };
+    frame.render_widget(Paragraph::new(Line::from(Span::styled(format!(" v toggle color direction — currently: {}", dir_label), Style::default().fg(TuiColor::Rgb(140, 140, 140))))).block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded)), top[2]);
 }
 
 // ── ASCII tab ────────────────────────────────────────────────────────────
@@ -1058,6 +1063,12 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
                         editor.editing_label_input = fields[idx].label.clone();
                         editor.input_mode = InputMode::EditingLabel;
                     }
+                }
+            }
+            KeyCode::Char('v') => {
+                if editor.tab == Tab::Theme {
+                    editor.cfg.logo.color_dir = if editor.cfg.logo.color_dir == "vertical" { "horizontal".into() } else { "vertical".into() };
+                    editor.dirty = true;
                 }
             }
             KeyCode::Char('c') => {

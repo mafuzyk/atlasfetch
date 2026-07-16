@@ -44,7 +44,11 @@ pub struct LogoConfig {
     pub path: String,
     #[serde(default = "default_logo_colors")]
     pub colors: Vec<Color>,
+    #[serde(default = "default_color_dir")]
+    pub color_dir: String,
 }
+
+fn default_color_dir() -> String { "horizontal".into() }
 
 impl Default for LogoConfig {
     fn default() -> Self {
@@ -52,6 +56,7 @@ impl Default for LogoConfig {
             key: default_logo_key(),
             path: default_logo_path(),
             colors: default_logo_colors(),
+            color_dir: default_color_dir(),
         }
     }
 }
@@ -344,6 +349,7 @@ impl Config {
                 key: default_logo_key(),
                 path: default_logo_path(),
                 colors,
+                color_dir: default_color_dir(),
             },
             title: TitleConfig {
                 format: default_title_format(),
@@ -383,6 +389,7 @@ impl Config {
                 key: default_logo_key(),
                 path: default_logo_path(),
                 colors,
+                color_dir: default_color_dir(),
             },
             title: TitleConfig {
                 format: default_title_format(),

@@ -226,14 +226,16 @@ pub fn render_ascii_only(cfg: &Config, ascii_art: &str) -> String {
     let base = Color::new(255, 255, 255);
     let max_w = lines.iter().map(|l| l.trim_end().width()).max().unwrap_or(0);
     let center = term_width.saturating_sub(max_w) / 2;
+    let is_vert = cfg.logo.color_dir == "vertical";
 
     let mut out = String::new();
     for (i, line) in lines.iter().enumerate() {
-        let color = cfg.logo.colors.get(i % cfg.logo.colors.len()).unwrap_or(&base);
         let trimmed = line.trim_end();
         out.push_str(&" ".repeat(center));
         let padded = format!("{:w$}", trimmed, w = max_w);
-        for ch in padded.chars() {
+        for (ci, ch) in padded.chars().enumerate() {
+            let idx = if is_vert { ci } else { i };
+            let color = cfg.logo.colors.get(idx % cfg.logo.colors.len()).unwrap_or(&base);
             if ch != ' ' {
                 out.push_str(&format!("{}{}", color.fg_escape(), ch));
             } else {
