@@ -124,13 +124,12 @@ pub fn all_themes() -> Vec<Theme> {
     ]
 }
 
-/// Mirror (ping-pong) index: 0,1,2,3,4,3,2,1,0,1,2,…
-/// This keeps flag stripes symmetrical even when the art has more rows than colours.
-pub fn mirror_index(i: usize, len: usize) -> usize {
-    if len <= 1 { return 0; }
-    let cycle = len * 2 - 2;
-    let idx = i % cycle;
-    if idx < len { idx } else { cycle - idx }
+/// Stretch index: maps position `i` (0..total) onto palette len so that the
+/// full flag pattern is always visible — colours are never clipped or wrapped.
+pub fn stretch_index(i: usize, total: usize, len: usize) -> usize {
+    if len <= 1 || total <= 1 { return 0; }
+    let pos = i * (len - 1) / (total - 1);
+    pos.min(len - 1)
 }
 
 /// Return a flag-pattern colour for a given position, if the palette matches

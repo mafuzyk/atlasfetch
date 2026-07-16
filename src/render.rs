@@ -99,7 +99,7 @@ pub fn render(cfg: &Config, info: &SysInfo, ascii_art: &str) -> Result<String> {
         };
 
         let logo_color = if lh > 0 && !cfg.logo.colors.is_empty() {
-            cfg.logo.colors[crate::theme::mirror_index(i, cfg.logo.colors.len())]
+            cfg.logo.colors[crate::theme::stretch_index(i, lh, cfg.logo.colors.len())]
         } else {
             Color::new(255, 255, 255)
         };
@@ -110,12 +110,12 @@ pub fn render(cfg: &Config, info: &SysInfo, ascii_art: &str) -> Result<String> {
             let right_def = right_fields.get(idx);
 
             let logo_left_color = if !cfg.logo.colors.is_empty() {
-                cfg.logo.colors[crate::theme::mirror_index(idx, cfg.logo.colors.len())]
+                cfg.logo.colors[crate::theme::stretch_index(idx, n, cfg.logo.colors.len())]
             } else {
                 Color::new(255, 255, 255)
             };
             let logo_right_color = if !cfg.logo.colors.is_empty() {
-                cfg.logo.colors[crate::theme::mirror_index(idx + 3, cfg.logo.colors.len())]
+                cfg.logo.colors[crate::theme::stretch_index(idx + 3, n + 3, cfg.logo.colors.len())]
             } else {
                 Color::new(255, 255, 255)
             };
@@ -237,7 +237,7 @@ pub fn render_ascii_only(cfg: &Config, ascii_art: &str) -> String {
             let flag_c = crate::theme::flag_color_at(&cfg.logo.colors, i, ci, lines.len(), max_w, is_vert);
             let color = flag_c.as_ref().unwrap_or_else(|| {
                 let idx = if is_vert { ci } else { i };
-                cfg.logo.colors.get(crate::theme::mirror_index(idx, cfg.logo.colors.len())).unwrap_or(&base)
+                cfg.logo.colors.get(crate::theme::stretch_index(idx, if is_vert { max_w } else { lines.len() }, cfg.logo.colors.len())).unwrap_or(&base)
             });
             if ch != ' ' {
                 out.push_str(&format!("{}{}", color.fg_escape(), ch));
@@ -308,7 +308,7 @@ pub fn render_mobile(cfg: &Config, info: &SysInfo, ascii_art: &str, is_narrow: b
         let block_center = term_width.saturating_sub(logo_width) / 2;
         for (i, line) in logo_lines.iter().enumerate() {
             let logo_color = if !cfg.logo.colors.is_empty() {
-                cfg.logo.colors[crate::theme::mirror_index(i, cfg.logo.colors.len())]
+                cfg.logo.colors[crate::theme::stretch_index(i, logo_lines.len(), cfg.logo.colors.len())]
             } else {
                 Color::new(255, 255, 255)
             };
@@ -400,7 +400,7 @@ pub fn render_mobile_preview(cfg: &Config, info: &SysInfo, ascii_art: &str, term
         let block_center = tw.saturating_sub(logo_width) / 2;
         for (i, line) in logo_lines.iter().enumerate() {
             let logo_color = if !cfg.logo.colors.is_empty() {
-                cfg.logo.colors[crate::theme::mirror_index(i, cfg.logo.colors.len())]
+                cfg.logo.colors[crate::theme::stretch_index(i, logo_lines.len(), cfg.logo.colors.len())]
             } else {
                 Color::new(255, 255, 255)
             };
