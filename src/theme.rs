@@ -148,7 +148,7 @@ pub fn flag_color_at(colors: &[Color], row: usize, col: usize, total_rows: usize
             let r = row as f64 / total_rows.max(1) as f64;
             let c = col as f64 / total_cols.max(1) as f64;
             let dist = ((r - 0.5).powi(2) + (c - 0.5).powi(2)).sqrt();
-            let in_ring = dist >= 0.20 && dist < 0.26;
+            let in_ring = dist >= 0.18 && dist < 0.22;
             return Some(if swapped {
                 if in_ring { *bg } else { *ring }
             } else {
