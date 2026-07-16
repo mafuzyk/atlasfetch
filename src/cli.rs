@@ -29,4 +29,8 @@ pub struct Args {
     /// Delete config and run setup wizard from scratch
     #[arg(long = "reset")]
     pub reset: bool,
+
+    /// Print only the ASCII art (centered, colored), no system info
+    #[arg(long = "just-ascii")]
+    pub just_ascii: bool,
 }

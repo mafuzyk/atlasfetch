@@ -400,6 +400,40 @@ pub fn render_preview(cfg: &Config, info: &SysInfo, ascii_art: &str, term_width:
     lines
 }
 
+// ── Standalone ASCII render ──────────────────────────────────────────────
+
+/// Render only the ASCII art, colored and centered, without any system info.
+pub fn render_ascii_only(cfg: &Config, ascii_art: &str) -> String {
+    let term_width = terminal_width();
+    let raw: Vec<String> = ascii_art.lines().map(|l| l.to_string()).collect();
+    let lines = dedent(&raw);
+
+    if lines.is_empty() {
+        return String::new();
+    }
+
+    let base = Color::new(255, 255, 255);
+    let max_w = lines.iter().map(|l| l.trim_end().width()).max().unwrap_or(0);
+    let center = term_width.saturating_sub(max_w) / 2;
+
+    let mut out = String::new();
+    for (i, line) in lines.iter().enumerate() {
+        let color = cfg.logo.colors.get(i % cfg.logo.colors.len()).unwrap_or(&base);
+        let trimmed = line.trim_end();
+        out.push_str(&" ".repeat(center));
+        for ch in trimmed.chars() {
+            if ch != ' ' {
+                out.push_str(&format!("{}{}", color.fg_escape(), ch));
+            } else {
+                out.push(' ');
+            }
+        }
+        out.push_str(RESET);
+        out.push('\n');
+    }
+    out
+}
+
 // ── Mobile ASCII compaction ──────────────────────────────────────────────
 
 /// Strip common leading whitespace from all lines.

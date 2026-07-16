@@ -198,6 +198,15 @@ fn main() -> Result<()> {
         }
     }
 
+    // --just-ascii: print only the ASCII art
+    if args.just_ascii {
+        ascii::ensure_logos()?;
+        let cfg = config::Config::load()?;
+        let ascii_art = ascii::load(&cfg)?;
+        print!("{}", render::render_ascii_only(&cfg, &ascii_art));
+        return Ok(());
+    }
+
     // setup: launch TUI configurator
     if args.setup {
         let mut cfg = config::Config::load()?;
