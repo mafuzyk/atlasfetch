@@ -101,7 +101,7 @@ pub fn all_themes() -> Vec<Theme> {
         theme!("lesbian", ["#D52D00", "#FF9A56", "#FFFFFF", "#D362A4", "#A30262"]),
         theme!("gay", ["#078D70", "#26CEAA", "#98E8C1", "#FFFFFF", "#7BADE2", "#5049CC", "#3D1A78"]),
         theme!("intersex", ["#FFD700", "#7902AA"]),
-        theme!("aromantic", ["#3DA542", "#A8D47A", "#FFFFFF", "#A8D47A", "#3DA542", "#000000"]),
+        theme!("aromantic", ["#3DA542", "#A8D47A", "#FFFFFF", "#BABABA", "#000000"]),
         theme!("agender", ["#000000", "#BABABA", "#FFFFFF", "#BABABA", "#000000"]),
 
         // Themes
