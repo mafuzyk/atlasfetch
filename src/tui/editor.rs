@@ -132,6 +132,7 @@ pub struct Editor {
     logo_keys: Vec<String>,
     ascii_art: String,
     ascii_source: String, // "builtin:key" | "file:path" | "pasted" | "disabled"
+    ascii_is_small: bool,
     // Panels
     panel_focus: bool, // false = left, true = right
     panel_left_sel: usize,
@@ -164,6 +165,11 @@ impl Editor {
         let info = info::collect()?;
         let logo_keys = ascii::available_logos()?;
         let ascii_art = ascii::load(&cfg)?;
+        let ascii_is_small = {
+            let small_key = format!("{}_small", cfg.logo.key);
+            let tw = crate::layout::terminal_width();
+            tw < 65 && ascii::has_variant(&small_key)
+        };
 
         // Determine initial ASCII source
         let ascii_source = if cfg.logo.key.is_empty() {
@@ -233,7 +239,7 @@ impl Editor {
             display_mode, mode_selected,
             themes, theme_selected, custom_palette_input: String::new(),
             logo_keys, ascii_art, ascii_source, ascii_selected,
-            ascii_search: String::new(),
+            ascii_search: String::new(), ascii_is_small,
             panel_focus: false, panel_left_sel: 0, panel_right_sel: 0,
             add_panel_available: available,
             add_panel_sel: 0,
@@ -280,7 +286,39 @@ impl Editor {
         self.file_browser_entries = entries;
     }
 
+    fn ensure_ascii_fits(&mut self) {
+        let term_w = crate::layout::terminal_width();
+        let art_width = self.ascii_art.lines()
+            .map(|l| l.trim_end().width())
+            .max()
+            .unwrap_or(0);
+        let small_key = format!("{}_small", self.cfg.logo.key);
+        let has_small = crate::ascii::has_variant(&small_key);
+
+        // If the art overflows the terminal, try switching to _small
+        if art_width > 0 && term_w.saturating_sub(art_width) < 10 && has_small && !self.ascii_is_small {
+            if let Ok(art) = crate::ascii::load_variant(&small_key) {
+                self.ascii_art = art;
+                self.ascii_is_small = true;
+            }
+        }
+
+        // If the terminal has grown enough, restore the full-sized art
+        if self.ascii_is_small {
+            if let Ok(art) = crate::ascii::load_variant(&self.cfg.logo.key) {
+                let full_w = art.lines().map(|l| l.trim_end().width()).max().unwrap_or(0);
+                if term_w.saturating_sub(full_w) >= 10 {
+                    self.ascii_art = art;
+                    self.ascii_is_small = false;
+                }
+            }
+        }
+    }
+
     fn refresh_preview(&mut self) {
+        // Auto-switch to _small if the current art is too wide for the terminal
+        self.ensure_ascii_fits();
+
         let tw = self.preview_width.max(20);
         let engine_layout = match self.display_mode {
             DisplayMode::Desktop => EngineLayout::Classic,

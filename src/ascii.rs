@@ -57,6 +57,30 @@ pub fn available_logos() -> Result<Vec<String>> {
     Ok(keys)
 }
 
+/// Check if a specific logo variant exists (fs or embedded).
+pub fn has_variant(key: &str) -> bool {
+    if let Ok(dir) = config::logo_dir() {
+        if dir.join(key).exists() {
+            return true;
+        }
+    }
+    get_embedded(key).is_some()
+}
+
+/// Load a specific logo variant by key.
+pub fn load_variant(key: &str) -> Result<String> {
+    if let Ok(dir) = config::logo_dir() {
+        let path = dir.join(key);
+        if let Ok(art) = fs::read_to_string(&path) {
+            return Ok(clean_ascii(&art));
+        }
+    }
+    if let Some(art) = get_embedded(key) {
+        return Ok(clean_ascii(art));
+    }
+    Ok(String::new())
+}
+
 /// Load the ASCII art for the current config.
 /// Auto-picks the `_small` variant when the terminal is narrower than 65 columns.
 pub fn load(cfg: &config::Config) -> Result<String> {
