@@ -1,5 +1,5 @@
 use super::{Component, RenderCtx, StyledSpan};
-use crate::widget::{FieldWidget, RenderCtx as WidgetCtx, Widget};
+use crate::widget::{FieldWidget, RenderCtx as WidgetCtx};
 
 pub struct SystemComponent;
 
@@ -35,7 +35,7 @@ impl Component for SystemComponent {
 
             if let Some(fd) = left.get(i).filter(|f| f.enabled) {
                 let wctx = WidgetCtx { info: ctx.info, panel_cfg: &ctx.cfg.panel, max_width: half.saturating_sub(4), fg_color: ctx.palette.get(i).copied().unwrap_or(crate::theme::Color::new(200, 200, 200)) };
-                let out = FieldWidget::from_def(fd.clone()).render(&wctx);
+                let out = FieldWidget::from_def(fd.clone()).render_inherent(&wctx);
                 for s in &out.styled {
                     line.push(StyledSpan::new(&s.text).fg(s.fg.unwrap_or(crate::theme::Color::new(200, 200, 200))));
                 }
@@ -49,7 +49,7 @@ impl Component for SystemComponent {
             if let Some(fd) = right.get(i).filter(|f| f.enabled) {
                 let right_off = (ctx.palette.len() / 2).max(1);
                 let wctx = WidgetCtx { info: ctx.info, panel_cfg: &ctx.cfg.panel, max_width: half.saturating_sub(4), fg_color: ctx.palette.get((i + right_off) % ctx.palette.len()).copied().unwrap_or(crate::theme::Color::new(200, 200, 200)) };
-                let out = FieldWidget::from_def(fd.clone()).render(&wctx);
+                let out = FieldWidget::from_def(fd.clone()).render_inherent(&wctx);
                 for s in &out.styled {
                     line.push(StyledSpan::new(&s.text).fg(s.fg.unwrap_or(crate::theme::Color::new(200, 200, 200))));
                 }

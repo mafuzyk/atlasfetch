@@ -112,32 +112,6 @@ impl SysInfo {
         }
     }
 
-    /// Extract a 0.0–1.0 progress value for bar rendering, when possible.
-    pub fn get_bar(&self, field: &str) -> Option<f64> {
-        let v = self.get(field)?;
-        // "X/Y" → ratio  (memory, disk, vram, storage)
-        if let Some((a, b)) = v.split_once('/') {
-            let num = a.trim_end_matches('G').trim().parse::<f64>().ok()?;
-            let den = b.trim_end_matches('G').trim().parse::<f64>().ok()?;
-            if den > 0.0 { return Some((num / den).clamp(0.0, 1.0)); }
-        }
-        // "X°C" → °C / 100
-        if let Some(temp) = v.strip_suffix("°C") {
-            let t = temp.trim().parse::<f64>().ok()?;
-            return Some((t / 100.0).clamp(0.0, 1.0));
-        }
-        // "X%" →  pct / 100
-        if let Some(pct) = v.strip_suffix('%') {
-            let p = pct.trim().parse::<f64>().ok()?;
-            return Some((p / 100.0).clamp(0.0, 1.0));
-        }
-        // "X/Y%" format (some battery_level values)
-        if let Some(pct) = v.strip_suffix('%') {
-            let p = pct.trim().parse::<f64>().ok()?;
-            return Some((p / 100.0).clamp(0.0, 1.0));
-        }
-        None
-    }
 }
 
 pub fn collect() -> Result<SysInfo> {

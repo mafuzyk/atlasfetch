@@ -19,10 +19,7 @@ use crate::component;
 use crate::config::{Config, FieldDef};
 use crate::info;
 use crate::layout::AppLayout;
-use crate::layout_engine::{self, Layout as EngineLayout};
-use crate::render::StyledSegment;
 use crate::theme::{self, Color};
-use crate::widget::{FieldWidget, Registry, Widget};
 
 // ── Tab enum ─────────────────────────────────────────────────────────────
 
@@ -318,140 +315,68 @@ impl Editor {
     }
 
     fn refresh_preview(&mut self) {
-        // Auto-switch to _small if the current art is too wide for the terminal
         self.ensure_ascii_fits();
 
         let tw = self.preview_width.max(20);
-        let engine_layout = match self.display_mode {
-            DisplayMode::Desktop => EngineLayout::Classic,
-            DisplayMode::Companion => EngineLayout::Compact,
-            DisplayMode::Monitor => EngineLayout::Minimal,
-        };
-        let engine = layout_engine::engine_for(engine_layout);
 
-        let mut reg = Registry::new();
-        for fd in self.cfg.display.left.iter().chain(self.cfg.display.right.iter()) {
-            if fd.enabled {
-                reg.register(Box::new(FieldWidget::from_def(fd.clone())));
-            }
-        }
-
-        let left_widgets: Vec<&dyn Widget> = self.cfg.display.left.iter()
-            .filter(|f| f.enabled)
-            .filter_map(|fd| reg.get(&fd.field))
-            .collect();
-
-        let right_widgets: Vec<&dyn Widget> = self.cfg.display.right.iter()
-            .filter(|f| f.enabled)
-            .filter_map(|fd| reg.get(&fd.field))
-            .collect();
-
-        let show_ascii = self.display_mode != DisplayMode::Monitor && self.display_mode != DisplayMode::Companion && self.ascii_source != "disabled";
-        let ascii_lines: Vec<String> = if show_ascii {
-            self.ascii_art.lines().map(|l| l.to_string()).collect()
-        } else {
-            Vec::new()
+        let scene = match self.cfg.scene.as_str() {
+            "dashboard" => component::Scene::Dashboard,
+            "cockpit" => component::Scene::Cockpit,
+            "split" | "split-monitor" => component::Scene::SplitMonitor,
+            _ => component::Scene::Classic,
         };
 
-        let output = engine.arrange(&left_widgets, &right_widgets, &ascii_lines, &self.cfg, &self.info, tw);
+        use component::Component;
+        let ascii_comp = component::ascii::AsciiComponent::new(self.ascii_art.clone());
+        let system_comp = component::system::SystemComponent;
+        let monitor_comp = component::monitor::MonitorComponent::new();
+        let companion_comp = component::companion::CompanionComponent;
+        let components: Vec<&dyn Component> = vec![&ascii_comp, &system_comp, &monitor_comp, &companion_comp];
+
+        let ctx = component::RenderCtx {
+            info: &self.info,
+            cfg: &self.cfg,
+            term_width: tw,
+            palette: &self.cfg.logo.colors,
+        };
+
+        let output = component::render_scene(scene, &components, &ctx);
 
         let mut lines: Vec<Line> = Vec::new();
-        let title_color = tui_color(&Color::from_hex_opt(&self.cfg.title.color).unwrap_or(Color::new(255, 154, 152)));
-        if !output.title.is_empty() {
-            lines.push(Line::from(vec![Span::raw("  "), Span::styled(output.title.clone(), Style::default().fg(title_color).add_modifier(Modifier::BOLD))]));
+
+        let title_text = self.cfg.title.format
+            .replace("{user}", &self.info.user)
+            .replace("{host}", &self.info.host);
+        if !title_text.is_empty() {
+            let title_color = tui_color(&Color::from_hex_opt(&self.cfg.title.color).unwrap_or(Color::new(255, 154, 152)));
+            lines.push(Line::from(vec![Span::raw("  "), Span::styled(title_text, Style::default().fg(title_color).add_modifier(Modifier::BOLD))]));
         }
-        if !output.separator.is_empty() {
+
+        if !self.cfg.separator.char.is_empty() {
             let sep_color = tui_color(&Color::from_hex_opt(&self.cfg.separator.color).unwrap_or(Color::new(157, 133, 255)));
-            lines.push(Line::from(vec![Span::raw("  "), Span::styled(output.separator.clone(), Style::default().fg(sep_color))]));
+            let sep_str: String = self.cfg.separator.char.repeat(tw.min(40));
+            lines.push(Line::from(vec![Span::raw("  "), Span::styled(sep_str, Style::default().fg(sep_color))]));
         }
 
-        let logo_width = ascii_lines.iter().map(|l| l.trim_end().width()).max().unwrap_or(0);
-        let logo_origin = if logo_width > 0 && logo_width < tw {
-            (tw.saturating_sub(logo_width)) / 2
-        } else {
-            0
-        };
-        let logo_colors = &self.cfg.logo.colors;
-        let is_vert = self.cfg.logo.color_dir == "vertical";
-
-        for (ri, row) in output.rows.iter().enumerate() {
-            let mut spans: Vec<Span> = Vec::new();
-
-            let right_vis = row.right_widgets.iter().map(|w| w.width).sum::<usize>();
-            let has_logo = row.logo_line.is_some();
-
-            if has_logo {
-                for w in &row.left_widgets {
-                    spans.extend(styled_to_spans(&w.styled));
-                }
-                let cur: usize = spans.iter().map(|s| s.content.width()).sum();
-                if logo_origin > cur {
-                    spans.push(Span::raw(" ".repeat(logo_origin - cur)));
-                }
-                if let Some(logo) = &row.logo_line {
-                    for (ci, ch) in logo.chars().enumerate() {
-                        let flag_c = theme::flag_color_at(logo_colors, ri, ci, output.rows.len(), logo_width, is_vert);
-                        let c = flag_c.unwrap_or_else(|| {
-                            let idx = if is_vert { ci } else { ri };
-                            logo_colors.get(theme::stretch_index(idx, if is_vert { logo_width } else { output.rows.len() }, logo_colors.len())).copied().unwrap_or(Color::new(255, 255, 255))
-                        });
-                        if ch != ' ' {
-                            spans.push(Span::styled(ch.to_string(), Style::default().fg(tui_color(&c))));
-                        } else {
-                            spans.push(Span::raw(" "));
-                        }
-                    }
-                }
-                let cur: usize = spans.iter().map(|s| s.content.width()).sum();
-                let right_target = tw.saturating_sub(right_vis);
-                if right_target > cur {
-                    spans.push(Span::raw(" ".repeat(right_target - cur)));
-                }
-                for w in &row.right_widgets {
-                    spans.extend(styled_to_spans(&w.styled));
-                }
-            } else {
-                for w in &row.left_widgets {
-                    spans.extend(styled_to_spans(&w.styled));
-                }
-                let cur: usize = spans.iter().map(|s| s.content.width()).sum();
-                let right_target = tw.saturating_sub(right_vis);
-                if right_target > cur {
-                    spans.push(Span::raw(" ".repeat(right_target - cur)));
-                }
-                for w in &row.right_widgets {
-                    spans.extend(styled_to_spans(&w.styled));
-                }
-            }
-
-            let cur: usize = spans.iter().map(|s| s.content.width()).sum();
-            if cur < tw {
-                spans.push(Span::raw(" ".repeat(tw - cur)));
-            }
-
+        for output_line in &output.lines {
+            let spans: Vec<Span> = output_line.iter().map(|s| {
+                let mut style = Style::default();
+                if let Some(fg) = &s.fg { style = style.fg(TuiColor::Rgb(fg.r, fg.g, fg.b)); }
+                if let Some(bg) = &s.bg { style = style.bg(TuiColor::Rgb(bg.r, bg.g, bg.b)); }
+                if s.bold { style = style.add_modifier(Modifier::BOLD); }
+                Span::styled(s.text.clone(), style)
+            }).collect();
             if !spans.is_empty() {
                 lines.push(Line::from(spans));
             }
-            if lines.len() >= self.preview_width / 2 { break; }
         }
+
         self.preview_lines = lines;
         self.dirty = false;
     }
 }
 
-// ── Color helpers ────────────────────────────────────────────────────────
-
 fn tui_color(c: &Color) -> TuiColor { TuiColor::Rgb(c.r, c.g, c.b) }
-
-fn styled_to_spans(segs: &[StyledSegment]) -> Vec<Span<'static>> {
-    segs.iter().map(|s| {
-        let mut st = Style::default();
-        if let Some(fg) = &s.fg { st = st.fg(tui_color(fg)); }
-        if let Some(bg) = &s.bg { st = st.bg(tui_color(bg)); }
-        if s.bold { st = st.add_modifier(Modifier::BOLD); }
-        Span::styled(s.text.clone(), st)
-    }).collect()
-}
 
 // ── Main UI ──────────────────────────────────────────────────────────────
 
