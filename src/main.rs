@@ -121,6 +121,13 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    // first run: launch setup TUI
+    if !config::config_path()?.exists() {
+        let mut cfg = config::Config::load()?;
+        tui::run(&mut cfg)?;
+        return Ok(());
+    }
+
     // default: print fetch output
     ascii::ensure_logos()?;
     let cfg = config::Config::load()?;
