@@ -147,6 +147,7 @@ pub struct Editor {
     layout_selected: usize,
     // ASCII selection
     ascii_selected: usize,
+    ascii_search: String,
     // General
     input_mode: InputMode,
     paste_buffer: String,
@@ -225,6 +226,7 @@ impl Editor {
             display_mode, mode_selected,
             themes, theme_selected, custom_palette_input: String::new(),
             logo_keys, ascii_art, ascii_source, ascii_selected,
+            ascii_search: String::new(),
             panel_focus: false, panel_left_sel: 0, panel_right_sel: 0,
             add_panel_available: available.into_iter().map(|(k, i, l)| (k.to_string(), i.to_string(), l.to_string())).collect(),
             add_panel_sel: 0,
@@ -518,7 +520,7 @@ fn render_hints(frame: &mut Frame, area: Rect, editor: &Editor) {
         Tab::Theme   => " ↑↓ theme  c custom palette  v toggle direction  Tab/Enter next  q quit",
         Tab::Mode    => " ↑↓ mode  Tab/Enter next  q quit",
         Tab::Layout  => " ↑↓ layout  Tab/Enter next  q quit",
-        Tab::Ascii   => " ↑↓ logo  d disable  c custom file  p paste  Tab/Enter next  q quit",
+        Tab::Ascii   => " ↑↓ logo  type to search  d disable  c file  p paste  Tab/Enter next  q quit",
         Tab::Panels  => " ↑↓ nav  Space toggle  [/] panel  a add  d delete  r reorder  e edit label  Tab/Enter next  q quit",
         Tab::Save    => " s save & exit  q discard",
     };
@@ -617,28 +619,30 @@ fn render_theme_tab(frame: &mut Frame, area: Rect, editor: &Editor) {
 // ── ASCII tab ────────────────────────────────────────────────────────────
 
 fn render_ascii_tab(frame: &mut Frame, area: Rect, editor: &Editor) {
-    let items: Vec<ListItem> = editor.logo_keys.iter().enumerate().map(|(i, key)| {
-        let sel = i == editor.ascii_selected;
-        ListItem::new(Line::from(vec![
-            Span::styled(if sel { "▸ " } else { "  " }, Style::default().fg(TuiColor::Rgb(133, 188, 255))),
-            Span::styled(key.clone(), if sel { Style::default().fg(TuiColor::Rgb(255,255,255)).add_modifier(Modifier::BOLD) } else { Style::default().fg(TuiColor::Rgb(200,200,200)) }),
-        ]))
-    }).collect();
-    let mut items = items;
+    let q = editor.ascii_search.to_lowercase();
     let n = editor.logo_keys.len();
-    // Custom file entry
+
+    let items: Vec<ListItem> = editor.logo_keys.iter().enumerate()
+        .filter(|(_, key)| q.is_empty() || key.to_lowercase().contains(&q))
+        .map(|(i, key)| {
+            let sel = i == editor.ascii_selected;
+            ListItem::new(Line::from(vec![
+                Span::styled(if sel { "▸ " } else { "  " }, Style::default().fg(TuiColor::Rgb(133, 188, 255))),
+                Span::styled(key.clone(), if sel { Style::default().fg(TuiColor::Rgb(255,255,255)).add_modifier(Modifier::BOLD) } else { Style::default().fg(TuiColor::Rgb(200,200,200)) }),
+            ]))
+        }).collect();
+    let mut items = items;
+    // Special entries always at the bottom
     let has_file = editor.ascii_selected == n;
     items.push(ListItem::new(Line::from(vec![
         Span::styled(if has_file { "▸ " } else { "  " }, Style::default().fg(TuiColor::Rgb(133, 188, 255))),
         Span::styled("[ Custom file ]", if has_file { Style::default().fg(TuiColor::Rgb(255,255,255)).add_modifier(Modifier::BOLD) } else { Style::default().fg(TuiColor::Rgb(200,200,200)) }),
     ])));
-    // Pasted entry
     let is_pasted = editor.ascii_selected == n + 1;
     items.push(ListItem::new(Line::from(vec![
         Span::styled(if is_pasted { "▸ " } else { "  " }, Style::default().fg(TuiColor::Rgb(133, 188, 255))),
         Span::styled("[ Paste ASCII ]", if is_pasted { Style::default().fg(TuiColor::Rgb(255,255,255)).add_modifier(Modifier::BOLD) } else { Style::default().fg(TuiColor::Rgb(200,200,200)) }),
     ])));
-    // Disabled entry
     let disabled = editor.ascii_selected == n + 2;
     items.push(ListItem::new(Line::from(vec![
         Span::styled(if disabled { "▸ " } else { "  " }, Style::default().fg(TuiColor::Rgb(133, 188, 255))),
@@ -871,7 +875,7 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
 
         // Normal mode key handling
         match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => {
+            KeyCode::Char('q') => {
                 if editor.tab == Tab::Save { return Ok(false); }
                 return Ok(false);
             }
@@ -899,23 +903,34 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
                         }
                     }
                     Tab::Ascii => {
+                        let q = editor.ascii_search.to_lowercase();
                         let n = editor.logo_keys.len();
-                        editor.ascii_selected = editor.ascii_selected.saturating_sub(1).min(n + 2);
-                        let sel = editor.ascii_selected;
-                        if sel < n {
-                            let key = &editor.logo_keys[sel];
-                            editor.ascii_source = format!("builtin:{}", key);
-                            editor.cfg.logo.key = key.clone();
-                            if let Ok(art) = ascii::load(&editor.cfg) {
-                                editor.ascii_art = art;
+                        let mut new_sel = editor.ascii_selected;
+                        loop {
+                            if new_sel == 0 { break; }
+                            new_sel -= 1;
+                            if new_sel >= n || q.is_empty() || editor.logo_keys[new_sel].to_lowercase().contains(&q) {
+                                break;
                             }
-                            editor.dirty = true;
-                        } else if sel == n + 2 && n > 0 {
-                            let key = &editor.logo_keys[0];
-                            editor.ascii_source = format!("builtin:{}", key);
-                            editor.ascii_art = ascii::load(&editor.cfg).unwrap_or_default();
-                            editor.cfg.logo.key = key.clone();
-                            editor.dirty = true;
+                        }
+                        if new_sel != editor.ascii_selected {
+                            editor.ascii_selected = new_sel;
+                            let sel = editor.ascii_selected;
+                            if sel < n {
+                                let key = &editor.logo_keys[sel];
+                                editor.ascii_source = format!("builtin:{}", key);
+                                editor.cfg.logo.key = key.clone();
+                                if let Ok(art) = ascii::load(&editor.cfg) {
+                                    editor.ascii_art = art;
+                                }
+                                editor.dirty = true;
+                            } else if sel == n + 2 && n > 0 {
+                                let key = &editor.logo_keys[0];
+                                editor.ascii_source = format!("builtin:{}", key);
+                                editor.ascii_art = ascii::load(&editor.cfg).unwrap_or_default();
+                                editor.cfg.logo.key = key.clone();
+                                editor.dirty = true;
+                            }
                         }
                     }
                     Tab::Panels => {
@@ -953,23 +968,36 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
                         }
                     }
                     Tab::Ascii => {
+                        let q = editor.ascii_search.to_lowercase();
                         let n = editor.logo_keys.len();
-                        editor.ascii_selected = (editor.ascii_selected + 1).min(n + 2);
-                        let sel = editor.ascii_selected;
-                        if sel < n {
-                            let key = &editor.logo_keys[sel];
-                            editor.ascii_source = format!("builtin:{}", key);
-                            editor.cfg.logo.key = key.clone();
-                            if let Ok(art) = ascii::load(&editor.cfg) {
-                                editor.ascii_art = art;
+                        let max = n + 2;
+                        let mut new_sel = editor.ascii_selected;
+                        loop {
+                            if new_sel >= max { break; }
+                            new_sel += 1;
+                            if new_sel > max { break; }
+                            if new_sel >= n || q.is_empty() || editor.logo_keys[new_sel].to_lowercase().contains(&q) {
+                                break;
                             }
-                            editor.dirty = true;
-                        } else if sel == n + 2 {
-                            editor.ascii_source = "disabled".into();
-                            editor.cfg.logo.key = String::new();
-                            editor.cfg.logo.path = "disabled".into();
-                            editor.ascii_art = String::new();
-                            editor.dirty = true;
+                        }
+                        if new_sel != editor.ascii_selected && new_sel <= max {
+                            editor.ascii_selected = new_sel;
+                            let sel = editor.ascii_selected;
+                            if sel < n {
+                                let key = &editor.logo_keys[sel];
+                                editor.ascii_source = format!("builtin:{}", key);
+                                editor.cfg.logo.key = key.clone();
+                                if let Ok(art) = ascii::load(&editor.cfg) {
+                                    editor.ascii_art = art;
+                                }
+                                editor.dirty = true;
+                            } else if sel == n + 2 {
+                                editor.ascii_source = "disabled".into();
+                                editor.cfg.logo.key = String::new();
+                                editor.cfg.logo.path = "disabled".into();
+                                editor.ascii_art = String::new();
+                                editor.dirty = true;
+                            }
                         }
                     }
                     Tab::Panels => {
@@ -1074,6 +1102,24 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
             KeyCode::Char('p') => {
                 if editor.tab == Tab::Ascii {
                     editor.input_mode = InputMode::PastingAscii;
+                }
+            }
+            KeyCode::Esc => {
+                if editor.tab == Tab::Ascii && !editor.ascii_search.is_empty() {
+                    editor.ascii_search.clear();
+                } else {
+                    if editor.tab == Tab::Save { return Ok(false); }
+                    return Ok(false);
+                }
+            }
+            KeyCode::Backspace => {
+                if editor.tab == Tab::Ascii && !editor.ascii_search.is_empty() {
+                    editor.ascii_search.pop();
+                }
+            }
+            KeyCode::Char(ch) => {
+                if editor.tab == Tab::Ascii && ch.is_ascii_alphanumeric() {
+                    editor.ascii_search.push(ch);
                 }
             }
             _ => {}

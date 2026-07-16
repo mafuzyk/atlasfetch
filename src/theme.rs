@@ -121,6 +121,9 @@ pub fn all_themes() -> Vec<Theme> {
 
         // SingularityOS
         theme!("singularityos", ["#1E1A2E", "#2C2545", "#3A3155", "#483B60", "#564570"]),
+
+        // Classic (all white)
+        theme!("classic", ["#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF"]),
     ]
 }
 
@@ -175,7 +178,7 @@ pub fn find_theme(name: &str) -> Option<Theme> {
 
 /// The default theme name used for new configs.
 #[allow(dead_code)]
-pub const DEFAULT_THEME: &str = "xenogender";
+pub const DEFAULT_THEME: &str = "singularityos";
 
 /// Pre-computed list of theme names for the TUI.
 #[allow(dead_code)]
@@ -185,5 +188,5 @@ pub const PRESET_THEMES: &[&str] = &[
     "arch", "catppuccin-mocha", "catppuccin-latte", "dracula",
     "gruvbox", "tokyonight", "nord", "everforest", "solarized-dark",
     "monokai", "one-dark", "rose-pine", "synthwave",
-    "singularityos",
+    "singularityos", "classic",
 ];

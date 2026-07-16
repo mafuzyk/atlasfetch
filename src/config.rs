@@ -184,20 +184,18 @@ pub struct FieldDef {
 // ── Defaults ─────────────────────────────────────────────────────────────
 
 fn default_logo_key() -> String {
-    "arch".into()
+    "singularityos".into()
 }
 fn default_logo_path() -> String {
     "~/.config/atlasfetch/logo.txt".into()
 }
 fn default_logo_colors() -> Vec<Color> {
     vec![
-        Color::from_hex("#FF6692"),
-        Color::from_hex("#FF9A98"),
-        Color::from_hex("#FFB883"),
-        Color::from_hex("#FBFFA8"),
-        Color::from_hex("#85BCFF"),
-        Color::from_hex("#9D85FF"),
-        Color::from_hex("#A510FF"),
+        Color::from_hex("#1E1A2E"),
+        Color::from_hex("#2C2545"),
+        Color::from_hex("#3A3155"),
+        Color::from_hex("#483B60"),
+        Color::from_hex("#564570"),
     ]
 }
 fn default_title_format() -> String {
@@ -333,7 +331,7 @@ impl Config {
             return Ok(cfg);
         }
         // Try migrating from old Python format
-        if let Ok(mut old) = serde_json::from_str::<OldConfig>(&raw) {
+        if let Ok(old) = serde_json::from_str::<OldConfig>(&raw) {
             let mut cfg = Self::migrate(old);
             cfg.display.dedup();
             cfg.save()?;
