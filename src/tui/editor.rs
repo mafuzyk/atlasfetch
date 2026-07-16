@@ -15,6 +15,7 @@ use std::io;
 use unicode_width::UnicodeWidthStr;
 
 use crate::ascii;
+use crate::component;
 use crate::config::{Config, FieldDef};
 use crate::info;
 use crate::layout::AppLayout;
@@ -124,6 +125,8 @@ pub struct Editor {
     app_layout: AppLayout,
     display_mode: DisplayMode,
     mode_selected: usize,
+    scene_selected: usize,
+    mode_focus: bool, // false = display modes, true = scenes
     // Theme
     themes: Vec<theme::Theme>,
     theme_selected: usize,
@@ -228,6 +231,7 @@ impl Editor {
         let layout_selected = AppLayout::pc_variants().iter().position(|l| *l == app_layout).unwrap_or(0);
         let display_mode = DisplayMode::Desktop;
         let mode_selected = 0;
+        let scene_selected = component::Scene::all().iter().position(|s| s.name() == cfg.scene).unwrap_or(0);
         let ascii_selected = match ascii_source.split_once(':') {
             Some(("builtin", k)) => logo_keys.iter().position(|lk| lk == k).unwrap_or(0),
             _ if ascii_source.starts_with("file:") => logo_keys.len(),
@@ -236,7 +240,7 @@ impl Editor {
         };
         let mut ed = Self {
             cfg, info, tab: Tab::Welcome, app_layout, layout_selected,
-            display_mode, mode_selected,
+            display_mode, mode_selected, scene_selected, mode_focus: false,
             themes, theme_selected, custom_palette_input: String::new(),
             logo_keys, ascii_art, ascii_source, ascii_selected,
             ascii_search: String::new(), ascii_is_small,
@@ -609,9 +613,10 @@ fn render_welcome_tab(frame: &mut Frame, area: Rect, _editor: &Editor) {
 // ── Mode tab ─────────────────────────────────────────────────────────────
 
 fn render_mode_tab(frame: &mut Frame, area: Rect, editor: &Editor) {
+    let halves = ratatui::layout::Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(area);
     let modes = DisplayMode::all();
-    let items: Vec<ListItem> = modes.iter().enumerate().map(|(i, m)| {
-        let sel = i == editor.mode_selected;
+    let mode_items: Vec<ListItem> = modes.iter().enumerate().map(|(i, m)| {
+        let sel = !editor.mode_focus && i == editor.mode_selected;
         ListItem::new(Line::from(vec![
             Span::styled(if sel { "▸ " } else { "  " }, Style::default().fg(TuiColor::Rgb(133, 188, 255))),
             Span::styled(m.name(), if sel { Style::default().fg(TuiColor::Rgb(255,255,255)).add_modifier(Modifier::BOLD) } else { Style::default().fg(TuiColor::Rgb(200,200,200)) }),
@@ -619,7 +624,27 @@ fn render_mode_tab(frame: &mut Frame, area: Rect, editor: &Editor) {
             Span::styled(m.desc(), Style::default().fg(TuiColor::Rgb(120,120,120))),
         ]))
     }).collect();
-    frame.render_widget(List::new(items).block(Block::default().title("Display Mode").borders(Borders::ALL).border_type(BorderType::Rounded).border_style(Style::default().fg(TuiColor::Rgb(157, 133, 255)))), area);
+    let mode_block = Block::default()
+        .title(" Display Mode ")
+        .borders(Borders::ALL).border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(if editor.mode_focus { TuiColor::Rgb(100,100,100) } else { TuiColor::Rgb(157, 133, 255) }));
+    frame.render_widget(List::new(mode_items).block(mode_block), halves[0]);
+
+    let scenes = component::Scene::all();
+    let scene_items: Vec<ListItem> = scenes.iter().enumerate().map(|(i, s)| {
+        let sel = editor.mode_focus && i == editor.scene_selected;
+        ListItem::new(Line::from(vec![
+            Span::styled(if sel { "▶ " } else { "  " }, Style::default().fg(TuiColor::Rgb(255, 184, 131))),
+            Span::styled(s.name(), if sel { Style::default().fg(TuiColor::Rgb(255,255,255)).add_modifier(Modifier::BOLD) } else { Style::default().fg(TuiColor::Rgb(200,200,200)) }),
+            Span::raw("  "),
+            Span::styled(s.description(), Style::default().fg(TuiColor::Rgb(120,120,120))),
+        ]))
+    }).collect();
+    let scene_block = Block::default()
+        .title(" Scene ")
+        .borders(Borders::ALL).border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(if editor.mode_focus { TuiColor::Rgb(157, 133, 255) } else { TuiColor::Rgb(100,100,100) }));
+    frame.render_widget(List::new(scene_items).block(scene_block), halves[1]);
 }
 
 // ── Layout tab ───────────────────────────────────────────────────────────
@@ -981,14 +1006,31 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
             }
             KeyCode::Enter | KeyCode::Tab => { editor.tab = editor.tab.next(); }
             KeyCode::BackTab => { editor.tab = editor.tab.prev(); }
+            KeyCode::Left => {
+                if editor.tab == Tab::Mode { editor.mode_focus = false; }
+                if editor.tab == Tab::Panels { editor.panel_focus = false; }
+            }
+            KeyCode::Right => {
+                if editor.tab == Tab::Mode { editor.mode_focus = true; }
+                if editor.tab == Tab::Panels { editor.panel_focus = true; }
+            }
             KeyCode::Up => {
                 match editor.tab {
                     Tab::Mode => {
-                        editor.mode_selected = editor.mode_selected.saturating_sub(1);
-                        let modes = DisplayMode::all();
-                        if editor.mode_selected < modes.len() {
-                            editor.display_mode = modes[editor.mode_selected];
-                            editor.dirty = true;
+                        if editor.mode_focus {
+                            editor.scene_selected = editor.scene_selected.saturating_sub(1);
+                            let scenes = component::Scene::all();
+                            if editor.scene_selected < scenes.len() {
+                                editor.cfg.scene = scenes[editor.scene_selected].name().to_lowercase();
+                                editor.dirty = true;
+                            }
+                        } else {
+                            editor.mode_selected = editor.mode_selected.saturating_sub(1);
+                            let modes = DisplayMode::all();
+                            if editor.mode_selected < modes.len() {
+                                editor.display_mode = modes[editor.mode_selected];
+                                editor.dirty = true;
+                            }
                         }
                     }
                     Tab::Layout => {
@@ -1046,12 +1088,22 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
             KeyCode::Down => {
                 match editor.tab {
                     Tab::Mode => {
-                        let max = DisplayMode::all().len().saturating_sub(1);
-                        editor.mode_selected = (editor.mode_selected + 1).min(max);
-                        let modes = DisplayMode::all();
-                        if editor.mode_selected < modes.len() {
-                            editor.display_mode = modes[editor.mode_selected];
-                            editor.dirty = true;
+                        if editor.mode_focus {
+                            let max = component::Scene::all().len().saturating_sub(1);
+                            editor.scene_selected = (editor.scene_selected + 1).min(max);
+                            let scenes = component::Scene::all();
+                            if editor.scene_selected < scenes.len() {
+                                editor.cfg.scene = scenes[editor.scene_selected].name().to_lowercase();
+                                editor.dirty = true;
+                            }
+                        } else {
+                            let max = DisplayMode::all().len().saturating_sub(1);
+                            editor.mode_selected = (editor.mode_selected + 1).min(max);
+                            let modes = DisplayMode::all();
+                            if editor.mode_selected < modes.len() {
+                                editor.display_mode = modes[editor.mode_selected];
+                                editor.dirty = true;
+                            }
                         }
                     }
                     Tab::Layout => {
