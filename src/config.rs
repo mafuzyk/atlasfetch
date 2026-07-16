@@ -191,11 +191,11 @@ fn default_logo_path() -> String {
 }
 fn default_logo_colors() -> Vec<Color> {
     vec![
-        Color::from_hex("#1E1A2E"),
-        Color::from_hex("#2C2545"),
-        Color::from_hex("#3A3155"),
-        Color::from_hex("#483B60"),
-        Color::from_hex("#564570"),
+        Color::from_hex("#C084FC"),
+        Color::from_hex("#A78BFA"),
+        Color::from_hex("#818CF8"),
+        Color::from_hex("#6366F1"),
+        Color::from_hex("#4F46E5"),
     ]
 }
 fn default_title_format() -> String {
