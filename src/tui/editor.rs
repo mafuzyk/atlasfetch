@@ -27,26 +27,79 @@ use crate::widget::{FieldWidget, Registry, Widget};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Tab {
-    Layout,
+    Welcome,
     Theme,
-    Ascii,
+    Mode,
+    Layout,
     Panels,
+    Ascii,
     Save,
 }
 
 impl Tab {
-    fn all() -> [Tab; 5] { [Tab::Layout, Tab::Theme, Tab::Ascii, Tab::Panels, Tab::Save] }
+    fn all() -> [Tab; 7] { [Tab::Welcome, Tab::Theme, Tab::Mode, Tab::Layout, Tab::Panels, Tab::Ascii, Tab::Save] }
     fn label(&self) -> &'static str {
         match self {
-            Tab::Layout => " Layout ",
-            Tab::Theme  => " Theme ",
-            Tab::Ascii  => " ASCII ",
-            Tab::Panels => " Panels ",
-            Tab::Save   => " Save ",
+            Tab::Welcome => " Welcome ",
+            Tab::Theme   => " Theme ",
+            Tab::Mode    => " Mode ",
+            Tab::Layout  => " Layout ",
+            Tab::Panels  => " Panels ",
+            Tab::Ascii   => " ASCII ",
+            Tab::Save    => " Save ",
         }
     }
-    fn next(&self) -> Self { match self { Tab::Layout => Tab::Theme, Tab::Theme => Tab::Ascii, Tab::Ascii => Tab::Panels, Tab::Panels => Tab::Save, Tab::Save => Tab::Layout } }
-    fn prev(&self) -> Self { match self { Tab::Layout => Tab::Save, Tab::Save => Tab::Panels, Tab::Panels => Tab::Ascii, Tab::Ascii => Tab::Theme, Tab::Theme => Tab::Layout } }
+    fn next(&self) -> Self {
+        match self {
+            Tab::Welcome => Tab::Theme,
+            Tab::Theme   => Tab::Mode,
+            Tab::Mode    => Tab::Layout,
+            Tab::Layout  => Tab::Panels,
+            Tab::Panels  => Tab::Ascii,
+            Tab::Ascii   => Tab::Save,
+            Tab::Save    => Tab::Welcome,
+        }
+    }
+    fn prev(&self) -> Self {
+        match self {
+            Tab::Welcome => Tab::Save,
+            Tab::Save    => Tab::Ascii,
+            Tab::Ascii   => Tab::Panels,
+            Tab::Panels  => Tab::Layout,
+            Tab::Layout  => Tab::Mode,
+            Tab::Mode    => Tab::Theme,
+            Tab::Theme   => Tab::Welcome,
+        }
+    }
+}
+
+// ── Display Mode ─────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum DisplayMode {
+    Desktop,
+    Companion,
+    Monitor,
+}
+
+impl DisplayMode {
+    fn all() -> &'static [DisplayMode] {
+        &[DisplayMode::Desktop, DisplayMode::Companion, DisplayMode::Monitor]
+    }
+    fn name(&self) -> &'static str {
+        match self {
+            DisplayMode::Desktop => "Desktop",
+            DisplayMode::Companion => "Companion",
+            DisplayMode::Monitor => "Monitor",
+        }
+    }
+    fn desc(&self) -> &'static str {
+        match self {
+            DisplayMode::Desktop => "Full fetch with ASCII art and panels",
+            DisplayMode::Companion => "Compact, minimal info always visible",
+            DisplayMode::Monitor => "Live system resource overview",
+        }
+    }
 }
 
 // ── Input sub-modes ──────────────────────────────────────────────────────
@@ -69,6 +122,8 @@ pub struct Editor {
     info: crate::info::SysInfo,
     tab: Tab,
     app_layout: AppLayout,
+    display_mode: DisplayMode,
+    mode_selected: usize,
     // Theme
     themes: Vec<theme::Theme>,
     theme_selected: usize,
@@ -96,6 +151,7 @@ pub struct Editor {
     input_mode: InputMode,
     paste_buffer: String,
     saved: bool,
+    preview_width: usize,
     preview_lines: Vec<Line<'static>>,
     term_width: u16,
     term_height: u16,
@@ -156,6 +212,8 @@ impl Editor {
 
         let (tw, th) = terminal::size()?;
         let layout_selected = AppLayout::pc_variants().iter().position(|l| *l == app_layout).unwrap_or(0);
+        let display_mode = DisplayMode::Desktop;
+        let mode_selected = 0;
         let ascii_selected = match ascii_source.split_once(':') {
             Some(("builtin", k)) => logo_keys.iter().position(|lk| lk == k).unwrap_or(0),
             _ if ascii_source.starts_with("file:") => logo_keys.len(),
@@ -163,7 +221,8 @@ impl Editor {
             _ => logo_keys.len() + 2,
         };
         let mut ed = Self {
-            cfg, info, tab: Tab::Layout, app_layout, layout_selected,
+            cfg, info, tab: Tab::Welcome, app_layout, layout_selected,
+            display_mode, mode_selected,
             themes, theme_selected, custom_palette_input: String::new(),
             logo_keys, ascii_art, ascii_source, ascii_selected,
             panel_focus: false, panel_left_sel: 0, panel_right_sel: 0,
@@ -176,6 +235,7 @@ impl Editor {
             input_mode: InputMode::Normal,
             paste_buffer: String::new(),
             saved: false,
+            preview_width: tw.saturating_sub(20) as usize,
             preview_lines: Vec::new(),
             term_width: tw, term_height: th, dirty: true,
         };
@@ -212,10 +272,11 @@ impl Editor {
     }
 
     fn refresh_preview(&mut self) {
-        let tw = self.term_width as usize;
-        let engine_layout = match self.app_layout {
-            AppLayout::Minimal => EngineLayout::Minimal,
-            _ => EngineLayout::Classic,
+        let tw = self.preview_width.max(20);
+        let engine_layout = match self.display_mode {
+            DisplayMode::Desktop => EngineLayout::Classic,
+            DisplayMode::Companion => EngineLayout::Compact,
+            DisplayMode::Monitor => EngineLayout::Minimal,
         };
         let engine = layout_engine::engine_for(engine_layout);
 
@@ -236,7 +297,7 @@ impl Editor {
             .filter_map(|fd| reg.get(&fd.field))
             .collect();
 
-        let show_ascii = self.app_layout != AppLayout::Minimal && self.ascii_source != "disabled";
+        let show_ascii = self.display_mode != DisplayMode::Monitor && self.display_mode != DisplayMode::Companion && self.ascii_source != "disabled";
         let ascii_lines: Vec<String> = if show_ascii {
             self.ascii_art.lines().map(|l| l.to_string()).collect()
         } else {
@@ -261,6 +322,7 @@ impl Editor {
         } else {
             0
         };
+        let logo_colors = &self.cfg.logo.colors;
 
         for row in &output.rows {
             let mut spans: Vec<Span> = Vec::new();
@@ -269,20 +331,23 @@ impl Editor {
             let has_logo = row.logo_line.is_some();
 
             if has_logo {
-                // Left widgets before logo
                 for w in &row.left_widgets {
                     spans.extend(styled_to_spans(&w.styled));
                 }
-                // Gap to logo center
                 let cur: usize = spans.iter().map(|s| s.content.width()).sum();
                 if logo_origin > cur {
                     spans.push(Span::raw(" ".repeat(logo_origin - cur)));
                 }
-                // Logo
                 if let Some(logo) = &row.logo_line {
-                    spans.push(Span::raw(logo.clone()));
+                    for (ci, ch) in logo.chars().enumerate() {
+                        let c = logo_colors.get(ci % logo_colors.len().max(1)).copied().unwrap_or(Color::new(255, 255, 255));
+                        if ch != ' ' {
+                            spans.push(Span::styled(ch.to_string(), Style::default().fg(tui_color(&c))));
+                        } else {
+                            spans.push(Span::raw(" "));
+                        }
+                    }
                 }
-                // Gap from logo end to right widgets
                 let cur: usize = spans.iter().map(|s| s.content.width()).sum();
                 let right_target = tw.saturating_sub(right_vis);
                 if right_target > cur {
@@ -292,7 +357,6 @@ impl Editor {
                     spans.extend(styled_to_spans(&w.styled));
                 }
             } else {
-                // No logo: left widgets on left, right widgets on right
                 for w in &row.left_widgets {
                     spans.extend(styled_to_spans(&w.styled));
                 }
@@ -306,7 +370,6 @@ impl Editor {
                 }
             }
 
-            // Pad to full width
             let cur: usize = spans.iter().map(|s| s.content.width()).sum();
             if cur < tw {
                 spans.push(Span::raw(" ".repeat(tw - cur)));
@@ -315,7 +378,7 @@ impl Editor {
             if !spans.is_empty() {
                 lines.push(Line::from(spans));
             }
-            if lines.len() >= self.term_height as usize { break; }
+            if lines.len() >= self.preview_width / 2 { break; }
         }
         self.preview_lines = lines;
         self.dirty = false;
@@ -347,6 +410,18 @@ fn render_editor(frame: &mut Frame, editor: &mut Editor) {
         let c = ratatui::layout::Layout::vertical([Constraint::Percentage(45), Constraint::Percentage(55)]).split(area);
         (c[0], c[1])
     };
+
+    // Update preview width for layout computations
+    let preview_w = if area.width >= 100 {
+        (area.width as f64 * 0.55) as u16
+    } else {
+        (area.height as f64 * 0.55) as u16
+    };
+    let preview_w = preview_w.saturating_sub(2).max(20) as usize;
+    if preview_w != editor.preview_width {
+        editor.preview_width = preview_w;
+        editor.dirty = true;
+    }
 
     if editor.input_mode != InputMode::Normal {
         render_overlay(frame, area, editor);
@@ -434,23 +509,65 @@ fn render_tabs(frame: &mut Frame, area: Rect, editor: &Editor) {
 
 fn render_hints(frame: &mut Frame, area: Rect, editor: &Editor) {
     let text = match editor.tab {
-        Tab::Layout => " ↑↓ layout  Tab next  q quit",
-        Tab::Theme  => " ↑↓ theme  Enter apply  c custom palette  Tab next  q quit",
-        Tab::Ascii  => " ↑↓ logo  Enter select  c custom file  p paste  d disable  Tab next  q quit",
-        Tab::Panels => " ↑↓ nav  Space toggle  [/] panel  a add  d delete  r reorder  e edit label Tab next  q quit",
-        Tab::Save   => " Enter save  q discard",
+        Tab::Welcome => " Tab next  Enter setup  q quit",
+        Tab::Theme   => " ↑↓ theme  Enter apply  c custom palette  Tab next  q quit",
+        Tab::Mode    => " ↑↓ mode  Enter apply  Tab next  q quit",
+        Tab::Layout  => " ↑↓ layout  Enter apply  Tab next  q quit",
+        Tab::Ascii   => " ↑↓ logo  Enter select  c custom file  p paste  d disable  Tab next  q quit",
+        Tab::Panels  => " ↑↓ nav  Space toggle  [/] panel  a add  d delete  r reorder  e edit label Tab next  q quit",
+        Tab::Save    => " Enter save  q discard",
     };
     frame.render_widget(Paragraph::new(Line::from(Span::styled(text, Style::default().fg(TuiColor::Rgb(140, 140, 140))))).style(Style::default().bg(TuiColor::Rgb(15, 15, 15))), area);
 }
 
 fn render_tab_content(frame: &mut Frame, area: Rect, editor: &Editor) {
     match editor.tab {
-        Tab::Layout => render_layout_tab(frame, area, editor),
-        Tab::Theme  => render_theme_tab(frame, area, editor),
-        Tab::Ascii  => render_ascii_tab(frame, area, editor),
-        Tab::Panels => render_panels_tab(frame, area, editor),
-        Tab::Save   => render_save_tab(frame, area, editor),
+        Tab::Welcome => render_welcome_tab(frame, area, editor),
+        Tab::Theme   => render_theme_tab(frame, area, editor),
+        Tab::Mode    => render_mode_tab(frame, area, editor),
+        Tab::Layout  => render_layout_tab(frame, area, editor),
+        Tab::Ascii   => render_ascii_tab(frame, area, editor),
+        Tab::Panels  => render_panels_tab(frame, area, editor),
+        Tab::Save    => render_save_tab(frame, area, editor),
     }
+}
+
+// ── Welcome tab ──────────────────────────────────────────────────────────
+
+fn render_welcome_tab(frame: &mut Frame, area: Rect, _editor: &Editor) {
+    frame.render_widget(
+        Paragraph::new(Text::from(vec![
+            Line::from(Span::styled("  Welcome to atlasfetch setup!", Style::default().fg(TuiColor::Rgb(133, 188, 255)).add_modifier(Modifier::BOLD))),
+            Line::from(""),
+            Line::from("  Use Tab to navigate through the configuration tabs:"),
+            Line::from(""),
+            Line::from("  1. Theme  — pick a color theme for your fetch"),
+            Line::from("  2. Mode   — choose a display preset (Desktop/Companion/Monitor)"),
+            Line::from("  3. Layout — adjust panel spacing and alignment"),
+            Line::from("  4. Panels — add, remove, and reorder info fields"),
+            Line::from("  5. ASCII  — select or disable ASCII art logos"),
+            Line::from("  6. Save   — save your configuration"),
+            Line::from(""),
+            Line::from(Span::styled("  Press Enter to start, or Tab to go to the next tab.", Style::default().fg(TuiColor::Rgb(157, 133, 255)))),
+        ]))
+        .block(Block::default().title("Welcome").borders(Borders::ALL).border_type(BorderType::Rounded).border_style(Style::default().fg(TuiColor::Rgb(133, 188, 255)))),
+        area);
+}
+
+// ── Mode tab ─────────────────────────────────────────────────────────────
+
+fn render_mode_tab(frame: &mut Frame, area: Rect, editor: &Editor) {
+    let modes = DisplayMode::all();
+    let items: Vec<ListItem> = modes.iter().enumerate().map(|(i, m)| {
+        let sel = i == editor.mode_selected;
+        ListItem::new(Line::from(vec![
+            Span::styled(if sel { "▸ " } else { "  " }, Style::default().fg(TuiColor::Rgb(133, 188, 255))),
+            Span::styled(m.name(), if sel { Style::default().fg(TuiColor::Rgb(255,255,255)).add_modifier(Modifier::BOLD) } else { Style::default().fg(TuiColor::Rgb(200,200,200)) }),
+            Span::raw("  "),
+            Span::styled(m.desc(), Style::default().fg(TuiColor::Rgb(120,120,120))),
+        ]))
+    }).collect();
+    frame.render_widget(List::new(items).block(Block::default().title("Display Mode").borders(Borders::ALL).border_type(BorderType::Rounded).border_style(Style::default().fg(TuiColor::Rgb(157, 133, 255)))), area);
 }
 
 // ── Layout tab ───────────────────────────────────────────────────────────
@@ -677,6 +794,7 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
                         if !editor.paste_buffer.is_empty() {
                             editor.ascii_art = editor.paste_buffer.clone();
                             editor.ascii_source = "pasted".into();
+                            editor.ascii_selected = editor.logo_keys.len() + 1; // "Paste" slot
                             editor.dirty = true;
                         }
                         editor.paste_buffer.clear();
@@ -722,6 +840,7 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
                                 if let Ok(art) = ascii::load(&editor.cfg) {
                                     editor.ascii_art = art;
                                 }
+                                editor.ascii_selected = editor.logo_keys.len(); // "Custom file" slot
                                 editor.dirty = true;
                                 editor.input_mode = InputMode::Normal;
                             }
@@ -752,6 +871,9 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
             KeyCode::BackTab => { editor.tab = editor.tab.prev(); }
             KeyCode::Up => {
                 match editor.tab {
+                    Tab::Mode => {
+                        editor.mode_selected = editor.mode_selected.saturating_sub(1);
+                    }
                     Tab::Layout => {
                         editor.layout_selected = editor.layout_selected.saturating_sub(1);
                     }
@@ -773,6 +895,10 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
             }
             KeyCode::Down => {
                 match editor.tab {
+                    Tab::Mode => {
+                        let max = DisplayMode::all().len().saturating_sub(1);
+                        editor.mode_selected = (editor.mode_selected + 1).min(max);
+                    }
                     Tab::Layout => {
                         let max = AppLayout::pc_variants().len().saturating_sub(1);
                         editor.layout_selected = (editor.layout_selected + 1).min(max);
@@ -802,6 +928,16 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
             }
             KeyCode::Enter => {
                 match editor.tab {
+                    Tab::Welcome => {
+                        editor.tab = Tab::Theme;
+                    }
+                    Tab::Mode => {
+                        let modes = DisplayMode::all();
+                        if editor.mode_selected < modes.len() {
+                            editor.display_mode = modes[editor.mode_selected];
+                            editor.dirty = true;
+                        }
+                    }
                     Tab::Layout => {
                         editor.apply_layout(editor.layout_selected);
                     }
@@ -833,6 +969,7 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
                             editor.cfg.logo.key = String::new();
                             editor.cfg.logo.path = "disabled".into();
                             editor.ascii_art = String::new();
+                            editor.ascii_selected = n + 2;
                             editor.dirty = true;
                         }
                     }
