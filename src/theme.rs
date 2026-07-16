@@ -120,7 +120,7 @@ pub fn all_themes() -> Vec<Theme> {
         theme!("synthwave", ["#ff7edb", "#ff7edb", "#36f9f6", "#36f9f6", "#ffe066", "#ffe066", "#b4a0ff"]),
 
         // SingularityOS
-        theme!("singularityos", ["#00D4AA", "#D4973A", "#E8E8F4", "#5B9EF5", "#F05A5A", "#4ADE80"]),
+        theme!("singularityos", ["#6A0DAD", "#FF1493", "#00CED1", "#FFF8DC", "#4169E1", "#9932CC", "#FF8C00"]),
     ]
 }
 
