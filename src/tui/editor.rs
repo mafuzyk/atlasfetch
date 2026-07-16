@@ -15,6 +15,7 @@ use std::io;
 use unicode_width::UnicodeWidthStr;
 
 use crate::ascii;
+use crate::component;
 use crate::config::{Config, FieldDef};
 use crate::info;
 use crate::layout::AppLayout;
@@ -565,7 +566,7 @@ fn render_hints(frame: &mut Frame, area: Rect, editor: &Editor) {
         Tab::Welcome => " Tab/Enter next  q quit",
         Tab::Theme   => " ↑↓ theme  c custom palette  v toggle direction  Tab/Enter next  q quit",
         Tab::Mode    => " ↑↓ mode  Tab/Enter next  q quit",
-        Tab::Layout  => " ↑↓ layout  Tab/Enter next  q quit",
+        Tab::Layout  => " ↑↓ scene  Tab/Enter next  q quit",
         Tab::Ascii   => " ↑↓ logo  type to search  d disable  c file  p paste  Tab/Enter next  q quit",
         Tab::Panels  => " ↑↓ nav  Space toggle  [/] panel  a add  d delete  r reorder  e edit label  Tab/Enter next  q quit",
         Tab::Save    => " s save & exit  q discard",
@@ -647,17 +648,17 @@ fn render_mode_tab(frame: &mut Frame, area: Rect, editor: &Editor) {
 // ── Layout tab ───────────────────────────────────────────────────────────
 
 fn render_layout_tab(frame: &mut Frame, area: Rect, editor: &Editor) {
-    let layouts = AppLayout::pc_variants();
-    let items: Vec<ListItem> = layouts.iter().enumerate().map(|(i, l)| {
-        let sel = i == editor.layout_selected;
+    let scenes = component::Scene::all();
+    let items: Vec<ListItem> = scenes.iter().map(|s| {
+        let sel = s.name().to_lowercase() == editor.cfg.scene;
         ListItem::new(Line::from(vec![
-            Span::styled(if sel { "▸ " } else { "  " }, Style::default().fg(TuiColor::Rgb(133, 188, 255))),
-            Span::styled(l.name(), if sel { Style::default().fg(TuiColor::Rgb(255,255,255)).add_modifier(Modifier::BOLD) } else { Style::default().fg(TuiColor::Rgb(200,200,200)) }),
+            Span::styled(if sel { "▶ " } else { "  " }, Style::default().fg(TuiColor::Rgb(255, 184, 131))),
+            Span::styled(s.name(), if sel { Style::default().fg(TuiColor::Rgb(255,255,255)).add_modifier(Modifier::BOLD) } else { Style::default().fg(TuiColor::Rgb(200,200,200)) }),
             Span::raw("  "),
-            Span::styled(l.description(), Style::default().fg(TuiColor::Rgb(120,120,120))),
+            Span::styled(s.description(), Style::default().fg(TuiColor::Rgb(120,120,120))),
         ]))
     }).collect();
-    frame.render_widget(List::new(items).block(Block::default().title("Layout").borders(Borders::ALL).border_type(BorderType::Rounded).border_style(Style::default().fg(TuiColor::Rgb(157, 133, 255)))), area);
+    frame.render_widget(List::new(items).block(Block::default().title("Scene").borders(Borders::ALL).border_type(BorderType::Rounded).border_style(Style::default().fg(TuiColor::Rgb(157, 133, 255)))), area);
 }
 
 // ── Theme tab ────────────────────────────────────────────────────────────
@@ -1031,8 +1032,13 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
                         }
                     }
                     Tab::Layout => {
-                        editor.layout_selected = editor.layout_selected.saturating_sub(1);
-                        editor.apply_layout(editor.layout_selected);
+                        let scenes = component::Scene::all();
+                        let cur = scenes.iter().position(|s| s.name().to_lowercase() == editor.cfg.scene).unwrap_or(0);
+                        let next = cur.saturating_sub(1);
+                        if next < scenes.len() {
+                            editor.cfg.scene = scenes[next].name().to_lowercase();
+                            editor.dirty = true;
+                        }
                     }
                     Tab::Theme => {
                         editor.theme_selected = editor.theme_selected.saturating_sub(1);
@@ -1101,9 +1107,13 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
                         }
                     }
                     Tab::Layout => {
-                        let max = AppLayout::pc_variants().len().saturating_sub(1);
-                        editor.layout_selected = (editor.layout_selected + 1).min(max);
-                        editor.apply_layout(editor.layout_selected);
+                        let scenes = component::Scene::all();
+                        let cur = scenes.iter().position(|s| s.name().to_lowercase() == editor.cfg.scene).unwrap_or(0);
+                        let next = (cur + 1).min(scenes.len().saturating_sub(1));
+                        if next < scenes.len() {
+                            editor.cfg.scene = scenes[next].name().to_lowercase();
+                            editor.dirty = true;
+                        }
                     }
                     Tab::Theme => {
                         let max = editor.themes.len().saturating_sub(1);

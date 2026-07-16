@@ -1180,14 +1180,22 @@ fn detect_font() -> String {
         }
     }
 
-    // GNOME Terminal (dconf/gsettings) - try gsettings
+    // GNOME Terminal — resolve profile UUID then read font
     if let Ok(out) = std::process::Command::new("gsettings")
-        .args(["get", "org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:$(gsettings get org.gnome.Terminal.ProfilesList default | tr -d \"'\")/", "font"])
-        .output()
+        .args(["get", "org.gnome.Terminal.ProfilesList", "default"]).output()
     {
-        let font = String::from_utf8_lossy(&out.stdout).trim().trim_matches('\'').to_string();
-        if !font.is_empty() && font != "@as" {
-            return font;
+        let uuid = String::from_utf8_lossy(&out.stdout).trim().trim_matches('\'').to_string();
+        if !uuid.is_empty() {
+            let path = format!("/org/gnome/terminal/legacy/profiles:/:{}/", uuid);
+            if let Ok(fout) = std::process::Command::new("gsettings")
+                .args(["get", &format!("org.gnome.Terminal.Legacy.Profile:{}", path), "font"])
+                .output()
+            {
+                let font = String::from_utf8_lossy(&fout.stdout).trim().trim_matches('\'').to_string();
+                if !font.is_empty() && font != "@as" {
+                    return font;
+                }
+            }
         }
     }
 

@@ -277,6 +277,7 @@ fn default_left_fields() -> Vec<FieldDef> {
         FieldDef { field: "kernel".into(),   icon: "\u{e271}".into(), label: "Krn".into(),      enabled: true },
         FieldDef { field: "packages".into(), icon: "\u{f1b3}".into(), label: "Pkg".into(),      enabled: true },
         FieldDef { field: "shell".into(),    icon: "\u{f489}".into(), label: "Sh".into(),       enabled: true },
+        FieldDef { field: "de".into(),       icon: "\u{f108}".into(), label: "DE".into(),       enabled: false },
         FieldDef { field: "wm".into(),       icon: "\u{f108}".into(), label: "WM".into(),       enabled: true },
     ]
 }
@@ -285,10 +286,12 @@ fn default_right_fields() -> Vec<FieldDef> {
     vec![
         FieldDef { field: "uptime".into(),   icon: "\u{f017}".into(), label: "Up".into(),       enabled: true },
         FieldDef { field: "terminal".into(), icon: "\u{f120}".into(), label: "Term".into(),     enabled: true },
+        FieldDef { field: "font".into(),     icon: "\u{f031}".into(), label: "Font".into(),     enabled: false },
         FieldDef { field: "cpu".into(),      icon: "\u{f2db}".into(), label: "CPU".into(),      enabled: true },
         FieldDef { field: "gpu".into(),      icon: "\u{f26c}".into(), label: "GPU".into(),      enabled: true },
         FieldDef { field: "memory".into(),   icon: "\u{f1c0}".into(), label: "Mem".into(),      enabled: true },
         FieldDef { field: "disk".into(),     icon: "\u{f0a0}".into(), label: "Dsk".into(),      enabled: true },
+        FieldDef { field: "local_ip".into(), icon: "\u{f0c1}".into(), label: "IP".into(),       enabled: false },
     ]
 }
 
