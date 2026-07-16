@@ -99,13 +99,21 @@ fn update_atlasfetch() -> Result<()> {
         format!("{}/.local/bin/atlasfetch", home)
     };
 
+    // Create parent directory if needed
+    if let Some(parent) = std::path::Path::new(&dest).parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
     println!("→ Installing to {}...", dest);
     let status = Command::new("cp")
         .args([&binary, &dest])
         .status()?;
 
     if !status.success() {
-        color_eyre::eyre::bail!("Failed to copy binary to {}. Try with 'sudo' or 'doas'.", dest);
+        color_eyre::eyre::bail!(
+            "Failed to copy binary to {}. Make sure the directory exists and is writable.",
+            dest
+        );
     }
 
     println!("✅ Updated to latest version!");
