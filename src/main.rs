@@ -16,6 +16,64 @@ mod tui;
 
 use clap::Parser;
 use color_eyre::Result;
+use std::process::Command;
+
+fn update_atlasfetch() -> Result<()> {
+    let src = std::env::var("ATLASFETCH_SRC").unwrap_or_else(|_| {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+        format!("{}/atlasfetch", home)
+    });
+
+    println!("📦 atlasfetch update — source: {}", src);
+
+    // git pull
+    println!("→ Pulling latest source...");
+    let status = Command::new("git")
+        .args(["-C", &src, "pull", "--rebase"])
+        .status()
+        .map_err(|e| color_eyre::eyre::eyre!("Failed to run git: {}. Is git installed?", e))?;
+
+    if !status.success() {
+        color_eyre::eyre::bail!(
+            "git pull failed. Make sure '{}' is a git clone of https://github.com/mafuzyk/atlasfetch",
+            src
+        );
+    }
+
+    // cargo build
+    println!("→ Building release binary...");
+    let status = Command::new("cargo")
+        .args(["build", "--release"])
+        .current_dir(&src)
+        .status()
+        .map_err(|e| color_eyre::eyre::eyre!("Failed to run cargo: {}. Is Rust installed?", e))?;
+
+    if !status.success() {
+        color_eyre::eyre::bail!("cargo build failed.");
+    }
+
+    // determine install path
+    let binary = format!("{}/target/release/atlasfetch", src);
+    let dest = if info::is_android() {
+        let prefix = std::env::var("PREFIX").unwrap_or_else(|_| "/data/data/com.termux/files/usr".into());
+        format!("{}/bin/atlasfetch", prefix)
+    } else {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+        format!("{}/.local/bin/atlasfetch", home)
+    };
+
+    println!("→ Installing to {}...", dest);
+    let status = Command::new("cp")
+        .args([&binary, &dest])
+        .status()?;
+
+    if !status.success() {
+        color_eyre::eyre::bail!("Failed to copy binary to {}. Try with 'sudo' or 'doas'.", dest);
+    }
+
+    println!("✅ Updated to latest version!");
+    Ok(())
+}
 
 fn main() -> Result<()> {
     color_eyre::install()?;
@@ -49,6 +107,11 @@ fn main() -> Result<()> {
             eprintln!("Preset \"{}\" not found. Use --list-presets.", name);
         }
         return Ok(());
+    }
+
+    // --update: pull, build, install
+    if args.update {
+        return update_atlasfetch();
     }
 
     // setup: launch TUI configurator

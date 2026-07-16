@@ -17,4 +17,8 @@ pub struct Args {
     /// List available presets with color swatches
     #[arg(long = "list-presets")]
     pub list_presets: bool,
+
+    /// Pull latest source, rebuild, and install
+    #[arg(long = "update")]
+    pub update: bool,
 }
