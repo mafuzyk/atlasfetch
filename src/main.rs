@@ -200,14 +200,6 @@ fn main() -> Result<()> {
         }
     }
 
-    // --editor: launch the new interactive editor with live preview
-    if args.editor {
-        let mut cfg = config::Config::load()?;
-        tui::run_editor(&mut cfg)?;
-        cfg.save()?;
-        return Ok(());
-    }
-
     // --just-ascii: print only the ASCII art
     if args.just_ascii {
         ascii::ensure_logos()?;
@@ -221,6 +213,7 @@ fn main() -> Result<()> {
     if args.setup {
         let mut cfg = config::Config::load()?;
         tui::run(&mut cfg)?;
+        cfg.save()?;
         return Ok(());
     }
 
@@ -228,6 +221,7 @@ fn main() -> Result<()> {
     if !config::config_path()?.exists() {
         let mut cfg = config::Config::load()?;
         tui::run(&mut cfg)?;
+        cfg.save()?;
         return Ok(());
     }
 

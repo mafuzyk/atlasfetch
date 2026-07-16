@@ -33,8 +33,4 @@ pub struct Args {
     /// Print only the ASCII art (centered, colored), no system info
     #[arg(long = "just-ascii")]
     pub just_ascii: bool,
-
-    /// Launch the new interactive editor with live preview
-    #[arg(long = "editor")]
-    pub editor: bool,
 }
