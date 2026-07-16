@@ -1,7 +1,6 @@
 use super::{Component, RenderCtx, StyledSpan};
 use crate::theme::Color;
 
-#[allow(dead_code)]
 pub struct CompanionComponent;
 
 impl Component for CompanionComponent {

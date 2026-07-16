@@ -141,6 +141,7 @@ fn render_classic(components: &[&dyn Component], ctx: &RenderCtx) -> SceneOutput
     let ascii = find_component(components, "ascii");
     let system = find_component(components, "system");
     let monitor = find_component(components, "monitor");
+    let companion = find_component(components, "companion");
 
     let ascii_lines = ascii.map(|c| c.render_styled(ctx)).unwrap_or_default();
     let sys_lines = system.map(|c| c.render_styled(ctx)).unwrap_or_default();
@@ -178,6 +179,17 @@ fn render_classic(components: &[&dyn Component], ctx: &RenderCtx) -> SceneOutput
         }
         all.push(line);
     }
+
+    // Companion section below the main block
+    if let Some(comp) = companion {
+        let comp_lines = comp.render_styled(ctx);
+        if !comp_lines.is_empty() {
+            let sep = "\u{2500}".repeat(ctx.term_width.min(40));
+            all.push(vec![StyledSpan::new(format!(" {} ", sep))]);
+            all.extend(comp_lines.iter().cloned());
+        }
+    }
+
     SceneOutput { lines: all }
 }
 

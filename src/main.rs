@@ -285,7 +285,8 @@ fn main() -> Result<()> {
         let ascii_comp = component::ascii::AsciiComponent::new(ascii_art.clone());
         let system_comp = component::system::SystemComponent;
         let monitor_comp = component::monitor::MonitorComponent;
-        let components: Vec<&dyn Component> = vec![&ascii_comp, &system_comp, &monitor_comp];
+        let companion_comp = component::companion::CompanionComponent;
+        let components: Vec<&dyn Component> = vec![&ascii_comp, &system_comp, &monitor_comp, &companion_comp];
         component::render_scene_ansi(scene, &components, &ctx)
     };
 

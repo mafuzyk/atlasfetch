@@ -667,33 +667,82 @@ fn render_ascii_tab(frame: &mut Frame, area: Rect, editor: &Editor) {
     let q = editor.ascii_search.to_lowercase();
     let n = editor.logo_keys.len();
 
+    // Split area: list on left, preview/count on right
+    let c = ratatui::layout::Layout::horizontal([Constraint::Fill(1), Constraint::Length(24)]).split(area);
+
     let items: Vec<ListItem> = editor.logo_keys.iter().enumerate()
         .filter(|(_, key)| q.is_empty() || key.to_lowercase().contains(&q))
         .map(|(i, key)| {
             let sel = i == editor.ascii_selected;
             ListItem::new(Line::from(vec![
-                Span::styled(if sel { "▸ " } else { "  " }, Style::default().fg(TuiColor::Rgb(133, 188, 255))),
-                Span::styled(key.clone(), if sel { Style::default().fg(TuiColor::Rgb(255,255,255)).add_modifier(Modifier::BOLD) } else { Style::default().fg(TuiColor::Rgb(200,200,200)) }),
+                Span::styled(
+                    if sel { "▶ " } else { "  " },
+                    Style::default().fg(if sel { TuiColor::Rgb(255, 184, 131) } else { TuiColor::Rgb(60, 60, 70) }),
+                ),
+                Span::styled(
+                    key.clone(),
+                    if sel {
+                        Style::default().fg(TuiColor::Rgb(255,255,255)).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(TuiColor::Rgb(200,200,200))
+                    },
+                ),
             ]))
         }).collect();
     let mut items = items;
     // Special entries always at the bottom
     let has_file = editor.ascii_selected == n;
     items.push(ListItem::new(Line::from(vec![
-        Span::styled(if has_file { "▸ " } else { "  " }, Style::default().fg(TuiColor::Rgb(133, 188, 255))),
+        Span::styled(if has_file { "▶ " } else { "  " }, Style::default().fg(if has_file { TuiColor::Rgb(255, 184, 131) } else { TuiColor::Rgb(60, 60, 70) })),
         Span::styled("[ Custom file ]", if has_file { Style::default().fg(TuiColor::Rgb(255,255,255)).add_modifier(Modifier::BOLD) } else { Style::default().fg(TuiColor::Rgb(200,200,200)) }),
     ])));
     let is_pasted = editor.ascii_selected == n + 1;
     items.push(ListItem::new(Line::from(vec![
-        Span::styled(if is_pasted { "▸ " } else { "  " }, Style::default().fg(TuiColor::Rgb(133, 188, 255))),
+        Span::styled(if is_pasted { "▶ " } else { "  " }, Style::default().fg(if is_pasted { TuiColor::Rgb(255, 184, 131) } else { TuiColor::Rgb(60, 60, 70) })),
         Span::styled("[ Paste ASCII ]", if is_pasted { Style::default().fg(TuiColor::Rgb(255,255,255)).add_modifier(Modifier::BOLD) } else { Style::default().fg(TuiColor::Rgb(200,200,200)) }),
     ])));
     let disabled = editor.ascii_selected == n + 2;
     items.push(ListItem::new(Line::from(vec![
-        Span::styled(if disabled { "▸ " } else { "  " }, Style::default().fg(TuiColor::Rgb(133, 188, 255))),
+        Span::styled(if disabled { "▶ " } else { "  " }, Style::default().fg(if disabled { TuiColor::Rgb(255, 102, 146) } else { TuiColor::Rgb(60, 60, 70) })),
         Span::styled("[ Disabled ]", if disabled { Style::default().fg(TuiColor::Rgb(255,102,146)).add_modifier(Modifier::BOLD) } else { Style::default().fg(TuiColor::Rgb(200,200,200)) }),
     ])));
-    frame.render_widget(List::new(items).block(Block::default().title("ASCII Art").borders(Borders::ALL).border_type(BorderType::Rounded).border_style(Style::default().fg(TuiColor::Rgb(255, 184, 131)))), area);
+
+    let search_hint = if editor.ascii_search.is_empty() {
+        " Search: type to filter".to_string()
+    } else {
+        format!(" Search: {}", editor.ascii_search)
+    };
+
+    let list_block = Block::default()
+        .title("ASCII Art")
+        .title_bottom(search_hint)
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(TuiColor::Rgb(255, 184, 131)));
+    frame.render_widget(List::new(items).block(list_block), c[0]);
+
+    // Mini preview panel on the right
+    let preview_block = Block::default()
+        .title("Preview")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(TuiColor::Rgb(133, 188, 255)));
+    let inner = preview_block.inner(c[1]);
+    frame.render_widget(Clear, c[1]);
+    frame.render_widget(preview_block, c[1]);
+
+    let mut mini: Vec<Line> = editor.ascii_art.lines()
+        .take(inner.height as usize)
+        .map(|l| {
+            let cleaned: String = l.chars().map(|c| if c == '\u{2800}' { ' ' } else { c }).collect();
+            Line::from(Span::styled(cleaned, Style::default().fg(TuiColor::Rgb(200, 200, 220))))
+        })
+        .collect();
+    // Fill remaining height
+    while mini.len() < inner.height as usize {
+        mini.push(Line::from(Span::raw("")));
+    }
+    frame.render_widget(Paragraph::new(Text::from(mini)), inner);
 }
 
 // ── Panels tab ───────────────────────────────────────────────────────────
@@ -1166,11 +1215,33 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
             KeyCode::Backspace => {
                 if editor.tab == Tab::Ascii && !editor.ascii_search.is_empty() {
                     editor.ascii_search.pop();
+                    let q = editor.ascii_search.to_lowercase();
+                    if !q.is_empty() {
+                        let n = editor.logo_keys.len();
+                        if editor.ascii_selected < n && !editor.logo_keys[editor.ascii_selected].to_lowercase().contains(&q) {
+                            editor.ascii_selected = editor.logo_keys.iter().position(|k| k.to_lowercase().contains(&q)).unwrap_or(0);
+                        }
+                    }
+                    editor.dirty = true;
                 }
             }
             KeyCode::Char(ch) => {
-                if editor.tab == Tab::Ascii && ch.is_ascii_alphanumeric() {
+                if editor.tab == Tab::Ascii && (ch.is_ascii_alphanumeric() || ch == '-' || ch == '_') {
                     editor.ascii_search.push(ch);
+                    let q = editor.ascii_search.to_lowercase();
+                    let n = editor.logo_keys.len();
+                    if editor.ascii_selected >= n || !editor.logo_keys[editor.ascii_selected].to_lowercase().contains(&q) {
+                        editor.ascii_selected = editor.logo_keys.iter().position(|k| k.to_lowercase().contains(&q)).unwrap_or(0);
+                        if editor.ascii_selected < n {
+                            let key = &editor.logo_keys[editor.ascii_selected];
+                            editor.ascii_source = format!("builtin:{}", key);
+                            editor.cfg.logo.key = key.clone();
+                            if let Ok(art) = ascii::load(&editor.cfg) {
+                                editor.ascii_art = art;
+                            }
+                        }
+                    }
+                    editor.dirty = true;
                 }
             }
             _ => {}
