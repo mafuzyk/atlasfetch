@@ -689,7 +689,7 @@ fn handle_event(app: &mut App) -> Result<bool> {
                                     app.show_preview = !app.show_preview;
                                 }
                                 KeyCode::Down | KeyCode::Char('j') => {
-                                    let layouts = AppLayout::variants();
+                                    let layouts = if app.is_mobile { AppLayout::mobile_variants() } else { AppLayout::pc_variants() };
                                     let i = app.layout_list_state.selected().unwrap_or(0);
                                     if i + 1 < layouts.len() {
                                         app.layout_list_state.select(Some(i + 1));
@@ -1042,7 +1042,7 @@ fn select_logo(app: &mut App, index: usize) {
 }
 
 fn apply_layout(app: &mut App, index: usize) {
-    let layouts = AppLayout::variants();
+    let layouts = if app.is_mobile { AppLayout::mobile_variants() } else { AppLayout::pc_variants() };
     if index < layouts.len() {
         let layout = layouts[index];
         app.cfg.panel.gap = layout.gap();
@@ -1455,7 +1455,7 @@ fn render_ascii_selection(frame: &mut Frame, area: Rect, app: &mut App) {
 // ── Layout selection ─────────────────────────────────────────────────────
 
 fn render_layout_selection(frame: &mut Frame, area: Rect, app: &mut App) {
-    let layouts = AppLayout::variants();
+    let layouts = if app.is_mobile { AppLayout::mobile_variants() } else { AppLayout::pc_variants() };
     let items: Vec<ListItem> = layouts.iter().map(|l| {
         let desc = l.description();
         ListItem::new(vec![
@@ -1501,6 +1501,34 @@ fn render_panel_editor(frame: &mut Frame, area: Rect, app: &mut App) {
         let widget = Paragraph::new(text)
             .block(Block::default().borders(Borders::ALL).title("Label Editor").border_type(BorderType::Rounded));
         frame.render_widget(widget, area);
+        return;
+    }
+
+    if app.is_mobile {
+        // Mobile: show only the focused panel, full width
+        let (items, state, title) = match app.panel_focus {
+            PanelFocus::Left => {
+                let items: Vec<ListItem> = app.cfg.display.left.iter().map(|f| {
+                    let check = if f.enabled { "✓" } else { " " };
+                    ListItem::new(format!(" [{}] {} ({})  {}", check, f.field, f.icon, f.label))
+                }).collect();
+                (items, &mut app.panel_left_state, "Left Panel")
+            }
+            PanelFocus::Right => {
+                let items: Vec<ListItem> = app.cfg.display.right.iter().map(|f| {
+                    let check = if f.enabled { "✓" } else { " " };
+                    ListItem::new(format!(" [{}] {} ({})  {}", check, f.field, f.icon, f.label))
+                }).collect();
+                (items, &mut app.panel_right_state, "Right Panel")
+            }
+        };
+        let list = List::new(items)
+            .block(Block::default()
+                .borders(Borders::ALL)
+                .title(format!("{} [focused]  ([/] switch)", title))
+                .border_style(Style::default().fg(TuiColor::Cyan)))
+            .highlight_style(Style::default().bg(TuiColor::Rgb(60, 60, 80)));
+        frame.render_stateful_widget(list, area, state);
         return;
     }
 

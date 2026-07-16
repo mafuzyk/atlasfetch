@@ -25,13 +25,19 @@ pub enum AppLayout {
 }
 
 impl AppLayout {
-    pub fn variants() -> &'static [AppLayout] {
+
+    pub fn pc_variants() -> &'static [AppLayout] {
         &[
             AppLayout::Centered,
             AppLayout::Compact,
             AppLayout::Wide,
             AppLayout::Minimal,
             AppLayout::Balanced,
+        ]
+    }
+
+    pub fn mobile_variants() -> &'static [AppLayout] {
+        &[
             AppLayout::Mobile,
             AppLayout::MobileNarrow,
         ]
