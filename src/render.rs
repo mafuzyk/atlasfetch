@@ -5,6 +5,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::config::{Config, FieldDef};
 use crate::info::SysInfo;
 use crate::theme::Color;
+use crate::widget::{FieldWidget, RenderCtx, Widget};
 
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
@@ -637,120 +638,16 @@ pub fn render_mobile_preview(cfg: &Config, info: &SysInfo, ascii_art: &str, term
 
 /// Format a panel field with truncation matching the original Python build().
 fn build_panel(field: &FieldDef, info: &SysInfo, panel: &crate::config::PanelConfig, fg_color: Color, avail_w: usize) -> (String, usize) {
-    let val = info.get(&field.field).unwrap_or("?");
-    let avail_w = avail_w.min(panel.max_val_width);
-
-    let sep = "\u{e0b0}";
-    let seg = format!(" {} {} ", field.icon, field.label);
-    let mut val_text = format!(" {} ", val);
-
-    let seg_vis = seg.width();
-    let val_vis = val_text.width();
-
-    let sep_color = Color::from_hex_opt(&panel.sep_color).unwrap_or(Color::new(157, 133, 255));
-    let val_color = Color::from_hex_opt(&panel.val_color).unwrap_or(Color::new(245, 220, 227));
-
-    // Compact layout uses max_val_width <= 35
-    let is_compact = panel.max_val_width <= 35;
-    let sep_space = if is_compact { "" } else { " " };
-
-    if seg_vis + 1 + val_vis > avail_w {
-        let need = seg_vis + 1 + 3;
-        if need > avail_w {
-            val_text = String::new();
-        } else {
-            let r = avail_w.saturating_sub(seg_vis + 2);
-            if r < 1 {
-                val_text = String::new();
-            } else {
-                let visible_r = r.saturating_sub(2);
-                let mut visible: String = val.chars().take(visible_r.max(1)).collect();
-                if visible.len() < val.len() {
-                    visible.pop();
-                    visible.push('\u{2026}');
-                }
-                val_text = format!(" {} ", visible);
-            }
-        }
-    }
-
-    let out = if val_text.trim().is_empty() {
-        format!(
-            "{}{} {}{}{}",
-            fg_color.fg_escape(),
-            seg,
-            sep_color.fg_escape(),
-            sep,
-            RESET,
-        )
-    } else {
-        format!(
-            "{}{}{}{}{}{}{}{}",
-            fg_color.fg_escape(),
-            seg,
-            sep_color.fg_escape(),
-            sep,
-            sep_space,
-            val_color.fg_escape(),
-            val_text.trim(),
-            RESET,
-        )
-    };
-
-    let vis = strip_ansi(&out).width();
-    (out, vis)
+    let ctx = RenderCtx { info, panel_cfg: panel, max_width: avail_w, fg_color };
+    let output = FieldWidget::from_def(field.clone()).render(&ctx);
+    (output.ansi, output.width)
 }
 
 /// Format a panel field as StyledSegments (for the TUI preview).
 fn build_panel_styled(field: &FieldDef, info: &SysInfo, panel: &crate::config::PanelConfig, fg_color: Color, avail_w: usize) -> (Vec<StyledSegment>, usize) {
-    let val = info.get(&field.field).unwrap_or("?");
-    let avail_w = avail_w.min(panel.max_val_width);
-
-    let sep = "\u{e0b0}";
-    let seg = format!(" {} {} ", field.icon, field.label);
-    let mut val_text = format!(" {} ", val);
-
-    let seg_vis = seg.width();
-    let val_vis = val_text.width();
-
-    let sep_color = Color::from_hex_opt(&panel.sep_color).unwrap_or(Color::new(157, 133, 255));
-    let val_color = Color::from_hex_opt(&panel.val_color).unwrap_or(Color::new(245, 220, 227));
-
-    // Compact layout uses max_val_width <= 35
-    let is_compact = panel.max_val_width <= 35;
-
-    if seg_vis + 1 + val_vis > avail_w {
-        let need = seg_vis + 1 + 3;
-        if need > avail_w {
-            val_text = String::new();
-        } else {
-            let r = avail_w.saturating_sub(seg_vis + 2);
-            if r < 1 {
-                val_text = String::new();
-            } else {
-                let visible_r = r.saturating_sub(2);
-                let mut visible: String = val.chars().take(visible_r.max(1)).collect();
-                if visible.len() < val.len() {
-                    visible.pop();
-                    visible.push('\u{2026}');
-                }
-                val_text = format!(" {} ", visible);
-            }
-        }
-    }
-
-    let mut parts = Vec::new();
-    parts.push(StyledSegment { text: seg, fg: Some(fg_color), bg: None, bold: false });
-    parts.push(StyledSegment { text: sep.to_string(), fg: Some(sep_color), bg: None, bold: false });
-    if !is_compact && !val_text.trim().is_empty() {
-        parts.push(StyledSegment { text: " ".to_string(), fg: None, bg: None, bold: false });
-    }
-    if !val_text.trim().is_empty() {
-        parts.push(StyledSegment { text: val_text.trim().to_string(), fg: Some(val_color), bg: None, bold: false });
-    }
-
-    let vis: usize = parts.iter().map(|s| UnicodeWidthStr::width(s.text.as_str())).sum();
-    (parts, vis)
+    let ctx = RenderCtx { info, panel_cfg: panel, max_width: avail_w, fg_color };
+    let output = FieldWidget::from_def(field.clone()).render(&ctx);
+    (output.styled, output.width)
 }
 
 /// Compute the total visible width of a sequence of StyledSegments.
@@ -778,7 +675,7 @@ fn terminal_width() -> usize {
     }
 }
 
-fn strip_ansi(s: &str) -> String {
+pub fn strip_ansi(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut in_escape = false;
     for c in s.chars() {

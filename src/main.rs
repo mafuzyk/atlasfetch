@@ -10,10 +10,12 @@ mod cli;
 mod config;
 mod info;
 mod layout;
+mod layout_engine;
 mod mobile;
 mod render;
 mod theme;
 mod tui;
+mod widget;
 
 use clap::Parser;
 use color_eyre::Result;
@@ -196,6 +198,14 @@ fn main() -> Result<()> {
             eprintln!("Unknown mode '{}'. Available modes: {:?}", mode_str, mobile::MobileMode::variants());
             return Ok(());
         }
+    }
+
+    // --editor: launch the new interactive editor with live preview
+    if args.editor {
+        let mut cfg = config::Config::load()?;
+        tui::run_editor(&mut cfg)?;
+        cfg.save()?;
+        return Ok(());
     }
 
     // --just-ascii: print only the ASCII art

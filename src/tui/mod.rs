@@ -4,6 +4,7 @@
 // depending on platform detection.
 
 mod app;
+mod editor;
 mod mobile;
 
 use color_eyre::Result;
@@ -14,4 +15,9 @@ pub fn run(cfg: &mut crate::config::Config) -> Result<()> {
     } else {
         app::run(cfg)
     }
+}
+
+/// Launch the new interactive editor with live preview.
+pub fn run_editor(cfg: &mut crate::config::Config) -> Result<()> {
+    editor::run(cfg)
 }
