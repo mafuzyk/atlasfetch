@@ -43,6 +43,25 @@ pub struct SysInfo {
     pub vram: String,
     pub flatpak: String,
     pub snap: String,
+    pub device: String,
+    pub rom: String,
+    pub soc: String,
+    pub arch: String,
+    pub battery_level: String,
+    pub battery_temp: String,
+    pub battery_health: String,
+    pub battery_status: String,
+    pub root_status: String,
+    pub bootloader: String,
+    pub selinux: String,
+    pub storage: String,
+    pub cpu_temp: String,
+    pub brightness: String,
+    pub refresh_rate: String,
+    pub signal: String,
+    pub wifi_ssid: String,
+    pub security_patch: String,
+    pub uptime_days: String,
 }
 
 impl SysInfo {
@@ -70,6 +89,25 @@ impl SysInfo {
             "vram" => Some(&self.vram),
             "flatpak" => Some(&self.flatpak),
             "snap" => Some(&self.snap),
+            "device" => Some(&self.device),
+            "rom" => Some(&self.rom),
+            "soc" => Some(&self.soc),
+            "arch" => Some(&self.arch),
+            "battery_level" => Some(&self.battery_level),
+            "battery_temp" => Some(&self.battery_temp),
+            "battery_health" => Some(&self.battery_health),
+            "battery_status" => Some(&self.battery_status),
+            "root_status" => Some(&self.root_status),
+            "bootloader" => Some(&self.bootloader),
+            "selinux" => Some(&self.selinux),
+            "storage" => Some(&self.storage),
+            "cpu_temp" => Some(&self.cpu_temp),
+            "brightness" => Some(&self.brightness),
+            "refresh_rate" => Some(&self.refresh_rate),
+            "signal" => Some(&self.signal),
+            "wifi_ssid" => Some(&self.wifi_ssid),
+            "security_patch" => Some(&self.security_patch),
+            "uptime_days" => Some(&self.uptime_days),
             _ => None,
         }
     }
@@ -100,6 +138,27 @@ pub fn collect() -> Result<SysInfo> {
     info.vram = read_vram();
     info.flatpak = count_flatpak();
     info.snap = count_snap();
+    info.arch = read_arch();
+    info.soc = read_cpu();
+    if is_android() {
+        info.device = read_device_model();
+        info.rom = read_rom();
+        info.battery_level = read_battery_level();
+        info.battery_temp = read_battery_temp();
+        info.battery_health = read_battery_health();
+        info.battery_status = read_battery_status();
+        info.root_status = detect_root();
+        info.bootloader = read_bootloader();
+        info.selinux = read_selinux();
+        info.storage = format_android_storage();
+        info.cpu_temp = read_cpu_temp();
+        info.brightness = read_brightness();
+        info.refresh_rate = read_refresh_rate();
+        info.signal = read_signal();
+        info.wifi_ssid = read_wifi_ssid();
+        info.security_patch = read_security_patch();
+    }
+    info.uptime_days = info.uptime.clone();
 
     Ok(info)
 }
@@ -1083,6 +1142,311 @@ fn detect_font() -> String {
         }
     }
 
+    String::new()
+}
+
+// ── Android / Mobile info ────────────────────────────────────────────────
+
+fn read_arch() -> String {
+    if let Ok(out) = std::process::Command::new("uname").arg("-m").output() {
+        if out.status.success() {
+            return String::from_utf8_lossy(&out.stdout).trim().to_string();
+        }
+    }
+    "unknown".into()
+}
+
+fn read_device_model() -> String {
+    if let Ok(out) = std::process::Command::new("getprop").arg("ro.product.model").output() {
+        if out.status.success() {
+            let model = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !model.is_empty() { return model; }
+        }
+    }
+    if let Ok(out) = std::process::Command::new("getprop").arg("ro.product.marketname").output() {
+        if out.status.success() {
+            let model = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !model.is_empty() { return model; }
+        }
+    }
+    String::new()
+}
+
+fn read_rom() -> String {
+    if let Ok(out) = std::process::Command::new("getprop").arg("ro.build.description").output() {
+        if out.status.success() {
+            let desc = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !desc.is_empty() {
+                if let Some(name) = desc.split_whitespace().next() {
+                    return name.to_string();
+                }
+                return desc;
+            }
+        }
+    }
+    if let Ok(out) = std::process::Command::new("getprop").arg("ro.build.display.id").output() {
+        if out.status.success() {
+            let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !id.is_empty() { return id; }
+        }
+    }
+    String::new()
+}
+
+fn read_battery_level() -> String {
+    let path = Path::new("/sys/class/power_supply/battery/capacity");
+    if let Ok(content) = fs::read_to_string(path) {
+        let level = content.trim().to_string();
+        if !level.is_empty() {
+            return format!("{}%", level);
+        }
+    }
+    String::new()
+}
+
+fn read_battery_temp() -> String {
+    let path = Path::new("/sys/class/power_supply/battery/temp");
+    if let Ok(content) = fs::read_to_string(path) {
+        if let Ok(raw) = content.trim().parse::<f64>() {
+            return format!("{:.0}°C", raw / 10.0);
+        }
+    }
+    // Alternative: thermal zone
+    for entry in fs::read_dir("/sys/class/thermal").unwrap_or_else(|_| fs::read_dir("/dev/null").unwrap()) {
+        if let Ok(entry) = entry {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.contains("battery") || name.contains("temp") {
+                if let Ok(content) = fs::read_to_string(entry.path().join("temp")) {
+                    if let Ok(raw) = content.trim().parse::<f64>() {
+                        return format!("{:.0}°C", raw / 1000.0);
+                    }
+                }
+            }
+        }
+    }
+    String::new()
+}
+
+fn read_battery_health() -> String {
+    let path = Path::new("/sys/class/power_supply/battery/health");
+    if let Ok(content) = fs::read_to_string(path) {
+        let h = content.trim().to_string();
+        if !h.is_empty() && h != "Unknown" { return h; }
+    }
+    String::new()
+}
+
+fn read_battery_status() -> String {
+    let path = Path::new("/sys/class/power_supply/battery/status");
+    if let Ok(content) = fs::read_to_string(path) {
+        return content.trim().to_string();
+    }
+    String::new()
+}
+
+fn detect_root() -> String {
+    // Check for su binary
+    for path in &["/system/bin/su", "/system/xbin/su", "/su/bin/su", "/data/adb/magisk"] {
+        if Path::new(path).exists() {
+            // Detect Magisk specifically
+            if Path::new("/data/adb/magisk").exists() || std::process::Command::new("magisk").arg("-c").output().is_ok() {
+                return "Magisk active".into();
+            }
+            if Path::new("/data/adb/apatch").exists() {
+                return "APatch active".into();
+            }
+            if Path::new("/data/adb/ksu").exists() {
+                return "KernelSU active".into();
+            }
+            return "Rooted (su)".into();
+        }
+    }
+    // Check if we can run a command as root
+    if std::process::Command::new("su").arg("-c").arg("id").output().is_ok() {
+        return "su available".into();
+    }
+    String::new()
+}
+
+fn read_bootloader() -> String {
+    if let Ok(out) = std::process::Command::new("getprop").arg("ro.boot.verifiedbootstate").output() {
+        if out.status.success() {
+            let state = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            match state.as_str() {
+                "orange" => return "Unlocked".into(),
+                "green" => return "Locked".into(),
+                "yellow" => return "Warning".into(),
+                _ => if !state.is_empty() { return state; }
+            }
+        }
+    }
+    if let Ok(out) = std::process::Command::new("getprop").arg("ro.boot.flash.locked").output() {
+        if out.status.success() {
+            match String::from_utf8_lossy(&out.stdout).trim() {
+                "0" => return "Unlocked".into(),
+                "1" => return "Locked".into(),
+                _ => {}
+            }
+        }
+    }
+    String::new()
+}
+
+fn read_selinux() -> String {
+    let path = Path::new("/proc/1/attr/current");
+    if let Ok(content) = fs::read_to_string(path) {
+        if content.contains("enforce") { return "Enforcing".into(); }
+        if content.contains("permissive") || content.contains("unconfined") {
+            return "Permissive".into();
+        }
+    }
+    // Try getprop
+    if let Ok(out) = std::process::Command::new("getprop").arg("ro.build.selinux").output() {
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !s.is_empty() { return s; }
+        }
+    }
+    String::new()
+}
+
+fn format_android_storage() -> String {
+    // Try /proc/partitions for a quick overview
+    if let Ok(content) = fs::read_to_string("/proc/partitions") {
+        let mut total_blocks: u64 = 0;
+        for line in content.lines().skip(2) {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 4 {
+                let name = parts[3];
+                // Skip loop, zram, ram
+                if name.starts_with("loop") || name.starts_with("zram") || name.starts_with("ram") {
+                    continue;
+                }
+                if let Ok(blocks) = parts[2].parse::<u64>() {
+                    total_blocks += blocks;
+                }
+            }
+        }
+        if total_blocks > 0 {
+            let gb = total_blocks as f64 * 1024.0 / 1_073_741_824.0;
+            return format!("{:.0}G", gb);
+        }
+    }
+    // Fallback: read from /proc/mounts for /data
+    if let Ok(content) = fs::read_to_string("/proc/mounts") {
+        for line in content.lines() {
+            if line.starts_with("/data") {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 3 && parts[2] != "f2fs" && parts[2] != "ext4" {
+                    continue;
+                }
+            }
+        }
+    }
+    String::new()
+}
+
+fn read_cpu_temp() -> String {
+    // Try thermal zones for CPU
+    let thermal = Path::new("/sys/class/thermal");
+    if let Ok(entries) = fs::read_dir(thermal) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with("thermal_zone") {
+                if let Ok(typ) = fs::read_to_string(entry.path().join("type")) {
+                    if typ.trim().contains("cpu") || typ.trim().contains("CPUTEMP") {
+                        if let Ok(content) = fs::read_to_string(entry.path().join("temp")) {
+                            if let Ok(raw) = content.trim().parse::<f64>() {
+                                let temp = if raw > 1000.0 { raw / 1000.0 } else { raw };
+                                return format!("{:.0}°C", temp);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    String::new()
+}
+
+fn read_brightness() -> String {
+    let backlight = Path::new("/sys/class/backlight");
+    if let Ok(entries) = fs::read_dir(backlight) {
+        for entry in entries.flatten() {
+            let dir = entry.path();
+            let max_path = dir.join("max_brightness");
+            let cur_path = if dir.join("actual_brightness").exists() {
+                dir.join("actual_brightness")
+            } else {
+                dir.join("brightness")
+            };
+            if let (Ok(max_str), Ok(cur_str)) = (fs::read_to_string(&max_path), fs::read_to_string(&cur_path)) {
+                if let (Ok(max), Ok(cur)) = (max_str.trim().parse::<f64>(), cur_str.trim().parse::<f64>()) {
+                    if max > 0.0 {
+                        return format!("{:.0}%", (cur / max) * 100.0);
+                    }
+                }
+            }
+        }
+    }
+    String::new()
+}
+
+fn read_refresh_rate() -> String {
+    // Try display hal
+    for path in &["/sys/class/drm/card0-DSI-1/modes", "/sys/class/drm/card0-eDP-1/modes",
+                  "/sys/class/drm/card1-DSI-1/modes", "/sys/class/drm/card1-eDP-1/modes"] {
+        if let Ok(content) = fs::read_to_string(path) {
+            for mode in content.lines() {
+                let parts: Vec<&str> = mode.split_whitespace().collect();
+                if let Some(last) = parts.last() {
+                    if let Ok(hz) = last.parse::<f64>() {
+                        return format!("{:.0}Hz", hz);
+                    }
+                }
+            }
+        }
+    }
+    String::new()
+}
+
+fn read_signal() -> String {
+    // Try to read from /proc/net/wireless
+    if let Ok(content) = fs::read_to_string("/proc/net/wireless") {
+        for line in content.lines().skip(2) {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 4 {
+                if let Ok(level) = parts[3].parse::<f64>() {
+                    if level < 0.0 {
+                        let bars = if level > -50.0 { 4 } else if level > -65.0 { 3 }
+                                   else if level > -80.0 { 2 } else { 1 };
+                        return format!("{}/4 ({}dBm)", bars, level as i64);
+                    }
+                }
+            }
+        }
+    }
+    String::new()
+}
+
+fn read_wifi_ssid() -> String {
+    // Try wpa_supplicant or iwconfig
+    if let Ok(out) = std::process::Command::new("iwgetid").arg("-r").output() {
+        if out.status.success() {
+            let ssid = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !ssid.is_empty() { return ssid; }
+        }
+    }
+    String::new()
+}
+
+fn read_security_patch() -> String {
+    if let Ok(out) = std::process::Command::new("getprop").arg("ro.build.version.security_patch").output() {
+        if out.status.success() {
+            let patch = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !patch.is_empty() { return patch; }
+        }
+    }
     String::new()
 }
 

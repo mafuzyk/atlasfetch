@@ -233,6 +233,28 @@ fn default_palette_processes() -> String {
     "green".into()
 }
 
+fn default_mobile_left_fields() -> Vec<FieldDef> {
+    vec![
+        FieldDef { field: "device".into(),       icon: "\u{f109}".into(), label: "Device".into(), enabled: true },
+        FieldDef { field: "os".into(),           icon: "\u{f17c}".into(), label: "OS".into(),     enabled: true },
+        FieldDef { field: "rom".into(),          icon: "\u{f0c6}".into(), label: "ROM".into(),    enabled: true },
+        FieldDef { field: "kernel".into(),       icon: "\u{e271}".into(), label: "Krn".into(),    enabled: true },
+        FieldDef { field: "root_status".into(),  icon: "\u{f023}".into(), label: "Root".into(),   enabled: true },
+        FieldDef { field: "battery_level".into(),icon: "\u{f0e7}".into(), label: "Bat".into(),    enabled: true },
+    ]
+}
+
+fn default_mobile_right_fields() -> Vec<FieldDef> {
+    vec![
+        FieldDef { field: "soc".into(),          icon: "\u{f2db}".into(), label: "SoC".into(),    enabled: true },
+        FieldDef { field: "memory".into(),       icon: "\u{f1c0}".into(), label: "RAM".into(),    enabled: true },
+        FieldDef { field: "storage".into(),      icon: "\u{f0a0}".into(), label: "Stor".into(),   enabled: true },
+        FieldDef { field: "battery_temp".into(), icon: "\u{f2c7}".into(), label: "Temp".into(),   enabled: true },
+        FieldDef { field: "uptime".into(),       icon: "\u{f017}".into(), label: "Up".into(),     enabled: true },
+        FieldDef { field: "packages".into(),     icon: "\u{f1b3}".into(), label: "Pkg".into(),    enabled: true },
+    ]
+}
+
 fn default_left_fields() -> Vec<FieldDef> {
     vec![
         FieldDef { field: "os".into(),       icon: "\u{f17c}".into(), label: "OS".into(),       enabled: true },
@@ -283,7 +305,11 @@ impl Config {
     pub fn load() -> Result<Self> {
         let path = config_path()?;
         if !path.exists() {
-            let cfg = Self::default();
+            let cfg = if crate::info::is_android() {
+                Self::mobile_default()
+            } else {
+                Self::default()
+            };
             cfg.save()?;
             return Ok(cfg);
         }
@@ -340,6 +366,45 @@ impl Config {
             display: DisplayConfig {
                 left: default_left_fields(),
                 right: default_right_fields(),
+            },
+            palette: PaletteConfig {
+                load: default_palette_load(),
+                processes: default_palette_processes(),
+            },
+            custom_palettes: std::collections::HashMap::new(),
+        }
+    }
+
+    pub fn mobile_default() -> Self {
+        let colors = default_logo_colors();
+        Config {
+            version: 2,
+            logo: LogoConfig {
+                key: default_logo_key(),
+                path: default_logo_path(),
+                colors,
+            },
+            title: TitleConfig {
+                format: default_title_format(),
+                color: default_title_color(),
+            },
+            separator: SeparatorConfig {
+                char: default_sep_char(),
+                color: default_sep_color(),
+                length: default_sep_length(),
+            },
+            panel: PanelConfig {
+                sep_color: default_panel_sep_color(),
+                val_color: default_panel_val_color(),
+                left_pad: 1,
+                right_pad: 1,
+                gap: 1,
+                max_shift: 0,
+                max_val_width: 999,
+            },
+            display: DisplayConfig {
+                left: default_mobile_left_fields(),
+                right: default_mobile_right_fields(),
             },
             palette: PaletteConfig {
                 load: default_palette_load(),

@@ -10,6 +10,7 @@ mod cli;
 mod config;
 mod info;
 mod layout;
+mod mobile;
 mod render;
 mod theme;
 mod tui;
@@ -148,6 +149,20 @@ fn main() -> Result<()> {
     // --update: pull, build, install
     if args.update {
         return update_atlasfetch();
+    }
+
+    // --mode: mobile rendering mode
+    if let Some(ref mode_str) = args.mode {
+        if let Some(mode) = mobile::MobileMode::from_str(mode_str) {
+            let cfg = config::Config::load()?;
+            let info = info::collect()?;
+            let ascii_art = ascii::load(&cfg)?;
+            print!("{}", mobile::render(&mode, &cfg, &info, &ascii_art));
+            return Ok(());
+        } else {
+            eprintln!("Unknown mode '{}'. Available modes: {:?}", mode_str, mobile::MobileMode::variants());
+            return Ok(());
+        }
     }
 
     // setup: launch TUI configurator

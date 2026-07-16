@@ -1,14 +1,17 @@
 // TUI setup configurator — launched via `atlasfetch setup`.
 //
-// Built with ratatui + crossterm. Uses a step-based navigation flow with a
-// live preview panel that updates as each setting changes.
-//
-// Design principles:
-//   - Settings on the left, live preview on the right
-//   - Keyboard navigation with tab/arrows, plus mouse support
-//   - Every change reflects immediately in the preview
-//   - Step indicator at the top showing progress
+// Built with ratatui + crossterm. Dispatches to PC or mobile TUI
+// depending on platform detection.
 
 mod app;
+mod mobile;
 
-pub use app::run;
+use color_eyre::Result;
+
+pub fn run(cfg: &mut crate::config::Config) -> Result<()> {
+    if crate::info::is_android() {
+        mobile::run(cfg)
+    } else {
+        app::run(cfg)
+    }
+}

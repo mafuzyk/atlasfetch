@@ -21,4 +21,8 @@ pub struct Args {
     /// Pull latest source, rebuild, and install
     #[arg(long = "update")]
     pub update: bool,
+
+    /// Mobile rendering mode: card, bios, companion, ascii
+    #[arg(long = "mode")]
+    pub mode: Option<String>,
 }

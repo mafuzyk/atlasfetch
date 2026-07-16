@@ -121,6 +121,38 @@ const ALL_FIELDS: &[(&str, &str, &str)] = &[
     ("snap", "\u{f1b3}", "Snap"),
 ];
 
+const MOBILE_FIELDS: &[(&str, &str, &str)] = &[
+    ("device", "\u{f109}", "Device"),
+    ("os", "\u{f17c}", "OS"),
+    ("rom", "\u{f0c6}", "ROM"),
+    ("soc", "\u{f2db}", "SoC"),
+    ("arch", "\u{f17c}", "Arch"),
+    ("kernel", "\u{e271}", "Krn"),
+    ("battery_level", "\u{f0e7}", "Bat"),
+    ("battery_temp", "\u{f2c7}", "Temp"),
+    ("battery_health", "\u{f004}", "Health"),
+    ("battery_status", "\u{f0e7}", "Charge"),
+    ("memory", "\u{f1c0}", "RAM"),
+    ("storage", "\u{f0a0}", "Stor"),
+    ("cpu", "\u{f2db}", "CPU"),
+    ("gpu", "\u{f26c}", "GPU"),
+    ("cpu_temp", "\u{f2c7}", "CPU Temp"),
+    ("uptime", "\u{f017}", "Up"),
+    ("packages", "\u{f1b3}", "Pkg"),
+    ("root_status", "\u{f023}", "Root"),
+    ("bootloader", "\u{f085}", "Bootloader"),
+    ("selinux", "\u{f023}", "SELinux"),
+    ("resolution", "\u{f108}", "Res"),
+    ("brightness", "\u{f185}", "Brightness"),
+    ("refresh_rate", "\u{f26c}", "Refresh"),
+    ("signal", "\u{f012}", "Signal"),
+    ("wifi_ssid", "\u{f1eb}", "WiFi"),
+    ("security_patch", "\u{f0c6}", "Sec. Patch"),
+    ("user", "\u{f007}", "Usr"),
+    ("local_ip", "\u{f0c1}", "IP"),
+    ("shell", "\u{f489}", "Sh"),
+];
+
 // ── App state ────────────────────────────────────────────────────────────
 
 pub struct App {
@@ -130,9 +162,9 @@ pub struct App {
     pub step: Step,
     // Should quit
     pub quit: bool,
-    // Mobile mode (Android or narrow terminal)
+    // Mobile mode — always false on PC TUI; mobile has its own TUI
     pub is_mobile: bool,
-    // Show preview overlay (mobile only)
+    // Show preview overlay
     pub show_preview: bool,
     // Available logo keys
     pub logo_keys: Vec<String>,
@@ -215,8 +247,7 @@ pub fn run(cfg: &mut Config) -> Result<()> {
     let current_ascii = ascii::load(cfg).unwrap_or_default();
 
     // Detect mobile
-    let term_w = terminal::size().map(|(w, _)| w).unwrap_or(80);
-    let is_mobile = info::is_android() || term_w < 80;
+    let is_mobile = false; // PC TUI — mobile has its own TUI (tui/mobile.rs)
 
     // Initial layout state
     let mut theme_list_state = ListState::default();
@@ -826,7 +857,8 @@ fn handle_event(app: &mut App) -> Result<bool> {
                                     };
                                     let existing: std::collections::HashSet<&str> =
                                         fields.iter().map(|f| f.field.as_str()).collect();
-                                    app.add_panel_available = ALL_FIELDS
+                                    let all_fields = if app.is_mobile { MOBILE_FIELDS } else { ALL_FIELDS };
+                                    app.add_panel_available = all_fields
                                         .iter()
                                         .filter(|(key, _, _)| !existing.contains(*key))
                                         .copied()
@@ -1644,6 +1676,25 @@ fn render_mobile_preview(frame: &mut Frame, area: Rect, app: &App) {
         vram: "8.0G".into(),
         flatpak: "24".into(),
         snap: "12".into(),
+        device: String::new(),
+        rom: String::new(),
+        soc: String::new(),
+        arch: String::new(),
+        battery_level: String::new(),
+        battery_temp: String::new(),
+        battery_health: String::new(),
+        battery_status: String::new(),
+        root_status: String::new(),
+        bootloader: String::new(),
+        selinux: String::new(),
+        storage: String::new(),
+        cpu_temp: String::new(),
+        brightness: String::new(),
+        refresh_rate: String::new(),
+        signal: String::new(),
+        wifi_ssid: String::new(),
+        security_patch: String::new(),
+        uptime_days: String::new(),
     };
 
     let is_narrow = app.term_width < 55;
@@ -1706,6 +1757,25 @@ fn render_preview(frame: &mut Frame, area: Rect, app: &App) {
         vram: "8.0G".into(),
         flatpak: "24".into(),
         snap: "12".into(),
+        device: String::new(),
+        rom: String::new(),
+        soc: String::new(),
+        arch: String::new(),
+        battery_level: String::new(),
+        battery_temp: String::new(),
+        battery_health: String::new(),
+        battery_status: String::new(),
+        root_status: String::new(),
+        bootloader: String::new(),
+        selinux: String::new(),
+        storage: String::new(),
+        cpu_temp: String::new(),
+        brightness: String::new(),
+        refresh_rate: String::new(),
+        signal: String::new(),
+        wifi_ssid: String::new(),
+        security_patch: String::new(),
+        uptime_days: String::new(),
     };
 
     let preview_lines = render::render_preview(&app.cfg, &info, &app.current_ascii, area.width.saturating_sub(2));
