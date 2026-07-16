@@ -120,6 +120,9 @@ pub fn all_themes() -> Vec<Theme> {
         theme!("one-dark", "Atom-inspired dark theme", ["#e06c75", "#d19a66", "#e5c07b", "#98c379", "#56b6c2", "#61afef", "#c678dd"]),
         theme!("rose-pine", "Soft pine-green dark theme", ["#eb6f92", "#f6c177", "#ebbcba", "#31748f", "#9ccfd8", "#c4a7e7", "#e0def4"]),
         theme!("synthwave", "Retro synthwave neon palette", ["#ff7edb", "#ff7edb", "#36f9f6", "#36f9f6", "#ffe066", "#ffe066", "#b4a0ff"]),
+
+        // SingularityOS
+        theme!("singularityos", "SingularityOS cosmic brand colors", ["#00D4AA", "#D4973A", "#E8E8F4", "#5B9EF5", "#F05A5A", "#4ADE80"]),
     ]
 }
 
@@ -140,4 +143,5 @@ pub const PRESET_THEMES: &[&str] = &[
     "arch", "catppuccin-mocha", "catppuccin-latte", "dracula",
     "gruvbox", "tokyonight", "nord", "everforest", "solarized-dark",
     "monokai", "one-dark", "rose-pine", "synthwave",
+    "singularityos",
 ];

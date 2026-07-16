@@ -130,6 +130,10 @@ pub struct App {
     pub step: Step,
     // Should quit
     pub quit: bool,
+    // Mobile mode (Android or narrow terminal)
+    pub is_mobile: bool,
+    // Show preview overlay (mobile only)
+    pub show_preview: bool,
     // Available logo keys
     pub logo_keys: Vec<String>,
     // Current ASCII art (for preview)
@@ -210,6 +214,10 @@ pub fn run(cfg: &mut Config) -> Result<()> {
     // Load current ASCII
     let current_ascii = ascii::load(cfg).unwrap_or_default();
 
+    // Detect mobile
+    let term_w = terminal::size().map(|(w, _)| w).unwrap_or(80);
+    let is_mobile = info::is_android() || term_w < 80;
+
     // Initial layout state
     let mut theme_list_state = ListState::default();
     theme_list_state.select(Some(0));
@@ -239,6 +247,8 @@ pub fn run(cfg: &mut Config) -> Result<()> {
         cfg: cfg.clone(),
         step: Step::Welcome,
         quit: false,
+        is_mobile,
+        show_preview: false,
         logo_keys,
         current_ascii,
         ascii_source,
@@ -322,6 +332,11 @@ fn handle_event(app: &mut App) -> Result<bool> {
     match event {
         Event::Key(key) => {
             if key.kind != KeyEventKind::Press {
+                return Ok(true);
+            }
+            // Esc closes preview overlay if open
+            if key.code == KeyCode::Esc && app.show_preview {
+                app.show_preview = false;
                 return Ok(true);
             }
             match app.input_mode {
@@ -544,6 +559,9 @@ fn handle_event(app: &mut App) -> Result<bool> {
                         }
                         Step::Theme => {
                             match key.code {
+                                KeyCode::Char('p') if app.is_mobile => {
+                                    app.show_preview = !app.show_preview;
+                                }
                                 KeyCode::Down | KeyCode::Char('j') => {
                                     let themes = theme::all_themes();
                                     let i = app.theme_list_state.selected().unwrap_or(0);
@@ -580,6 +598,9 @@ fn handle_event(app: &mut App) -> Result<bool> {
                         }
                         Step::Ascii => {
                             match key.code {
+                                KeyCode::Char('p') if app.is_mobile => {
+                                    app.show_preview = !app.show_preview;
+                                }
                                 KeyCode::Down | KeyCode::Char('j') => {
                                     let len = app.logo_keys.len().max(1);
                                     let i = app.logo_list_state.selected().unwrap_or(0);
@@ -631,6 +652,9 @@ fn handle_event(app: &mut App) -> Result<bool> {
                         }
                         Step::Layout => {
                             match key.code {
+                                KeyCode::Char('p') if app.is_mobile => {
+                                    app.show_preview = !app.show_preview;
+                                }
                                 KeyCode::Down | KeyCode::Char('j') => {
                                     let layouts = AppLayout::variants();
                                     let i = app.layout_list_state.selected().unwrap_or(0);
@@ -662,6 +686,9 @@ fn handle_event(app: &mut App) -> Result<bool> {
                         }
                         Step::Panels => {
                             match key.code {
+                                KeyCode::Char('p') if app.is_mobile => {
+                                    app.show_preview = !app.show_preview;
+                                }
                                 KeyCode::Tab => {
                                     // Toggle between left and right panel
                                     app.panel_focus = match app.panel_focus {
@@ -822,6 +849,9 @@ fn handle_event(app: &mut App) -> Result<bool> {
                         }
                         Step::Summary => {
                             match key.code {
+                                KeyCode::Char('p') if app.is_mobile => {
+                                    app.show_preview = !app.show_preview;
+                                }
                                 KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('s') => {
                                     // Save configuration
                                     app.cfg.version = 2;
@@ -1028,8 +1058,21 @@ fn ui(frame: &mut Frame, app: &mut App) {
     if app.step == Step::Welcome {
         // Welcome screen: full-width, no preview
         render_welcome(frame, chunks[1]);
+    } else if app.is_mobile {
+        // Mobile: no split, settings full-width, preview via overlay
+        render_settings(frame, chunks[1], app);
+        if app.show_preview {
+            // Render preview as centered overlay
+            let pw = area.width.min(80).saturating_sub(4).max(20);
+            let ph = area.height.saturating_sub(8);
+            let px = area.x + (area.width.saturating_sub(pw)) / 2;
+            let py = area.y + (area.height.saturating_sub(ph)) / 2;
+            let overlay_area = Rect::new(px, py, pw, ph);
+            frame.render_widget(Clear, overlay_area);
+            render_mobile_preview(frame, overlay_area, app);
+        }
     } else {
-        // Other screens: horizontal split (settings | preview)
+        // PC: horizontal split (settings | preview)
         let main_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
@@ -1496,6 +1539,62 @@ fn render_summary(frame: &mut Frame, area: Rect, app: &App) {
 
 // ── Live preview ─────────────────────────────────────────────────────────
 
+fn render_mobile_preview(frame: &mut Frame, area: Rect, app: &App) {
+    // Build minimal SysInfo for preview
+    let info = info::SysInfo {
+        os: "CachyOS".into(),
+        host: "atlasbox".into(),
+        user: "charlie".into(),
+        kernel: "7.1.3".into(),
+        uptime: "2h 14m".into(),
+        packages: "1766".into(),
+        shell: "fish".into(),
+        terminal: "kitty".into(),
+        cpu: "AMD Ryzen 3 2200G".into(),
+        gpu: "Radeon Vega 8".into(),
+        memory: "4.9/13.6G".into(),
+        disk: "28/219G".into(),
+        wm: "Hyprland".into(),
+        load: "0.42".into(),
+        processes: "342".into(),
+        local_ip: String::new(),
+        resolution: String::new(),
+        de: String::new(),
+        font: String::new(),
+        vram: "8.0G".into(),
+        flatpak: "24".into(),
+        snap: "12".into(),
+    };
+
+    let is_narrow = app.term_width < 55;
+    let preview_lines = render::render_mobile_preview(
+        &app.cfg, &info, &app.current_ascii,
+        area.width.saturating_sub(2), is_narrow,
+    );
+
+    // Convert StyledLines to ratatui Text
+    let lines: Vec<Line> = preview_lines.iter().map(|sl| {
+        let spans: Vec<Span> = sl.segments.iter().map(|seg| {
+            let mut style = Style::default();
+            if let Some(fg) = &seg.fg {
+                style = style.fg(TuiColor::Rgb(fg.r, fg.g, fg.b));
+            }
+            if let Some(bg) = &seg.bg {
+                style = style.bg(TuiColor::Rgb(bg.r, bg.g, bg.b));
+            }
+            if seg.bold {
+                style = style.add_modifier(Modifier::BOLD);
+            }
+            Span::styled(seg.text.clone(), style)
+        }).collect();
+        Line::from(spans)
+    }).collect();
+
+    let paragraph = Paragraph::new(Text::from(lines))
+        .block(Block::default().borders(Borders::ALL).title("Preview (Esc to close)").border_type(BorderType::Rounded));
+    frame.render_widget(paragraph, area);
+}
+
 fn render_preview(frame: &mut Frame, area: Rect, app: &App) {
     // For ASCII step, show only the art centered and clean
     if app.step == Step::Ascii {
@@ -1596,13 +1695,22 @@ fn render_ascii_only_preview(frame: &mut Frame, area: Rect, app: &App) {
 // ── Footer / navigation bar ──────────────────────────────────────────────
 
 fn render_footer(frame: &mut Frame, area: Rect, app: &App) {
+    if app.show_preview {
+        let footer = Paragraph::new(Span::raw(" [Esc] Close preview"))
+            .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded));
+        frame.render_widget(footer, area);
+        return;
+    }
+
     let nav = match app.step {
         Step::Welcome => " [Enter/Space] Begin  |  [q/Esc] Quit".to_string(),
         Step::Theme => {
             let extra = if app.input_mode == InputMode::EditingCustomPalette {
                 "  [Enter] apply  [Esc] cancel".to_string()
             } else {
-                "  [c] custom palette".to_string()
+                let mut s = "  [c] custom palette".to_string();
+                if app.is_mobile { s.push_str("  [p] preview"); }
+                s
             };
             format!(" [←] Back  |  [→/Tab] Next  {}", extra)
         }
@@ -1614,7 +1722,9 @@ fn render_footer(frame: &mut Frame, area: Rect, app: &App) {
                     if app.input_mode == InputMode::BrowsingFile {
                         "  [~] home  [Backspace] up  [Enter] select  [Esc] cancel".to_string()
                     } else {
-                        "  [c]ustom  [p]aste  [d]isable".to_string()
+                        let mut s = "  [c]ustom  [p]aste  [d]isable".to_string();
+                        if app.is_mobile { s.push_str("  [p] preview"); }
+                        s
                     }
                 }
                                 Step::Panels => {
@@ -1624,11 +1734,20 @@ fn render_footer(frame: &mut Frame, area: Rect, app: &App) {
                         "  [Space] toggle  [r] reorder up  [e] edit  [a] add  [d] delete  [Tab] switch".to_string()
                     }
                 }
+                Step::Layout => {
+                    let mut s = String::new();
+                    if app.is_mobile { s.push_str("  [p] preview"); }
+                    s
+                }
                 _ => String::new(),
             };
             format!(" {}  |  {}  {}", prev, next, extra)
         }
-        Step::Summary => " [Enter/s] Save & exit  |  [n/Esc] Discard & exit".to_string(),
+        Step::Summary => {
+            let mut s = " [Enter/s] Save & exit  |  [n/Esc] Discard & exit".to_string();
+            if app.is_mobile { s.push_str("  [p] preview"); }
+            s
+        }
     };
 
     let footer = Paragraph::new(Span::raw(nav))

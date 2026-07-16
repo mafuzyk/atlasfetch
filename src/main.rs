@@ -63,7 +63,18 @@ fn main() -> Result<()> {
     let cfg = config::Config::load()?;
     let info = info::collect()?;
     let ascii_art = ascii::load(&cfg)?;
-    let output = render::render(&cfg, &info, &ascii_art)?;
+
+    let term_width = layout::terminal_width();
+    let is_mobile = info::is_android() || term_width < 80;
+
+    let output = if is_mobile && term_width < 55 {
+        render::render_mobile(&cfg, &info, &ascii_art, true)?
+    } else if is_mobile {
+        render::render_mobile(&cfg, &info, &ascii_art, false)?
+    } else {
+        render::render(&cfg, &info, &ascii_art)?
+    };
+
     print!("{}", output);
     Ok(())
 }

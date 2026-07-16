@@ -107,6 +107,28 @@ It displays your distro's ASCII logo centered on the terminal, with powerline-st
 
 <br>
 
+<details>
+<summary><b>Termux (Android)</b></summary>
+
+```bash
+pkg upgrade && pkg install rust binutils
+git clone https://github.com/mafuzyk/atlasfetch.git
+cd atlasfetch
+cargo build --release
+cp target/release/atlasfetch $PREFIX/bin/
+```
+
+On Termux, atlasfetch automatically adapts to the mobile screen:
+- **Landscape (55-79 cols)**: ASCII left with panels stacked on the right
+- **Portrait (< 55 cols)**: Single-column panels, no ASCII
+- **PC connection (> 80 cols)**: Standard centered layout
+
+The TUI configurator (`atlasfetch setup`) also adapts: no horizontal split, preview is shown via `p` key.
+
+</details>
+
+<br>
+
 <details open>
 <summary><b>Build from source</b> — recommended</summary>
 

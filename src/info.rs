@@ -9,6 +9,16 @@ use color_eyre::Result;
 use std::fs;
 use std::path::Path;
 
+pub fn is_android() -> bool {
+    if std::env::var("TERMUX_VERSION").is_ok() {
+        return true;
+    }
+    if Path::new("/system/build.prop").exists() {
+        return true;
+    }
+    false
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct SysInfo {
     pub os: String,
@@ -84,7 +94,7 @@ pub fn collect() -> Result<SysInfo> {
     info.processes = count_processes();
     info.packages = count_packages();
     info.local_ip = local_ip();
-    info.resolution = String::new();
+    info.resolution = detect_resolution();
     info.de = String::new();
     info.font = detect_font();
     info.vram = read_vram();
@@ -97,6 +107,20 @@ pub fn collect() -> Result<SysInfo> {
 // ── OS detection ─────────────────────────────────────────────────────────
 
 fn detect_os() -> String {
+    if is_android() {
+        if let Ok(ver) = std::env::var("TERMUX_VERSION") {
+            return format!("Termux {}", ver);
+        }
+        if let Ok(content) = fs::read_to_string("/system/build.prop") {
+            for line in content.lines() {
+                if let Some(val) = line.strip_prefix("ro.build.version.release=") {
+                    return format!("Android {}", val.trim());
+                }
+            }
+        }
+        return "Android".into();
+    }
+
     for path in &["/etc/os-release", "/usr/lib/os-release"] {
         if let Ok(content) = fs::read_to_string(path) {
             for line in content.lines() {
@@ -357,6 +381,50 @@ fn read_gpu() -> String {
             }
         }
     }
+
+    if is_android() {
+        // Qualcomm Adreno
+        let kgsl_path = Path::new("/sys/class/kgsl/kgsl-3d0");
+        if kgsl_path.exists() {
+            if let Ok(model) = fs::read_to_string(kgsl_path.join("gpu_model")) {
+                let trimmed = model.trim().to_string();
+                if !trimmed.is_empty() {
+                    return trimmed;
+                }
+            }
+            // Fallback: read device name
+            if let Ok(name) = fs::read_to_string(kgsl_path.join("device_name")) {
+                let trimmed = name.trim().to_string();
+                if !trimmed.is_empty() {
+                    return trimmed;
+                }
+            }
+        }
+        // ARM Mali
+        let mali_path = Path::new("/sys/devices/platform");
+        if let Ok(entries) = fs::read_dir(mali_path) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                if name_str.contains("mali") {
+                    if let Ok(gpuinfo) = fs::read_to_string(entry.path().join("gpuinfo")) {
+                        let trimmed = gpuinfo.trim().to_string();
+                        if !trimmed.is_empty() {
+                            return trimmed;
+                        }
+                    }
+                    return "ARM Mali".into();
+                }
+            }
+        }
+        // PowerVR / other
+        if let Ok(content) = fs::read_to_string("/proc/gpucrypto") {
+            if content.contains("GPU") || content.contains("gpu") {
+                return "PowerVR".into();
+            }
+        }
+    }
+
     "unknown".into()
 }
 
@@ -394,7 +462,7 @@ fn format_memory() -> String {
 // ── Disk ─────────────────────────────────────────────────────────────────
 
 fn format_disk(mount: &str) -> String {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     {
         let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
         let cpath = std::ffi::CString::new(mount).unwrap_or_default();
@@ -501,6 +569,35 @@ fn count_processes() -> String {
 // ── Packages ─────────────────────────────────────────────────────────────
 
 fn count_packages() -> String {
+    if is_android() {
+        if let Ok(out) = std::process::Command::new("apt")
+            .args(["list", "--installed"])
+            .output()
+        {
+            if out.status.success() {
+                let count = String::from_utf8_lossy(&out.stdout)
+                    .lines()
+                    .filter(|l| l.contains('/'))
+                    .count();
+                if count > 0 {
+                    return count.to_string();
+                }
+            }
+        }
+        // Fallback: try dpkg-query
+        if let Ok(out) = std::process::Command::new("dpkg-query")
+            .args(["-f", ".\\n", "-W"])
+            .output()
+        {
+            if out.status.success() {
+                let count = String::from_utf8_lossy(&out.stdout).lines().count();
+                if count > 0 {
+                    return count.to_string();
+                }
+            }
+        }
+    }
+
     let mut counts: Vec<String> = Vec::new();
 
     // pacman
@@ -606,6 +703,31 @@ fn count_packages() -> String {
 // ── VRAM ─────────────────────────────────────────────────────────────────
 
 fn read_vram() -> String {
+    if is_android() {
+        // Qualcomm Adreno — kgsl
+        let kgsl_path = Path::new("/sys/class/kgsl/kgsl-3d0");
+        if kgsl_path.exists() {
+            // Try dedicated VRAM size
+            if let Ok(_content) = fs::read_to_string(kgsl_path.join("gpu_freq_table")) {
+                // Not VRAM, but worth checking other files
+            }
+            // Some kernels expose gpubusy which contains busy/total time, not VRAM
+            // Try to read meminfo for shared GPU memory
+            if let Ok(content) = fs::read_to_string("/proc/meminfo") {
+                for line in content.lines() {
+                    if let Some(val) = line.strip_prefix("MemTotal:") {
+                        let kb: u64 = val.trim().split_whitespace().next().unwrap_or("0").parse().unwrap_or(0);
+                        if kb > 0 {
+                            let gb = kb as f64 / 1_048_576.0;
+                            return format!("Shared {:.1}G", gb);
+                        }
+                    }
+                }
+            }
+        }
+        return String::new();
+    }
+
     let drm_path = Path::new("/sys/class/drm");
     if let Ok(entries) = fs::read_dir(drm_path) {
         for entry in entries.flatten() {
@@ -657,6 +779,78 @@ fn count_snap() -> String {
             }
         }
     }
+    String::new()
+}
+
+// ── Resolution ───────────────────────────────────────────────────────────
+
+fn detect_resolution() -> String {
+    if is_android() {
+        if let Ok(out) = std::process::Command::new("wm").args(["size"]).output() {
+            if out.status.success() {
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                for line in stdout.lines() {
+                    if let Some(size) = line.strip_prefix("Physical size: ") {
+                        return size.trim().to_string();
+                    }
+                }
+            }
+        }
+        // Fallback: read from build.prop
+        if let Ok(content) = fs::read_to_string("/system/build.prop") {
+            for line in content.lines() {
+                if line.contains("ro.sf.lcd_density") || line.contains("ro.opengles.version") {
+                    // These don't give resolution directly, continue
+                }
+            }
+        }
+        // Try reading from sysfs graphics
+        let fb_path = Path::new("/sys/class/graphics/fb0");
+        if fb_path.exists() {
+            let mut w = None;
+            let mut h = None;
+            if let Ok(virtual_size) = fs::read_to_string(fb_path.join("virtual_size")) {
+                let parts: Vec<&str> = virtual_size.trim().split(',').collect();
+                if parts.len() >= 2 {
+                    w = parts[0].parse::<u32>().ok();
+                    h = parts[1].parse::<u32>().ok();
+                }
+            }
+            if w.is_none() || h.is_none() {
+                if let Ok(xres) = fs::read_to_string(fb_path.join("xres")) {
+                    w = xres.trim().parse::<u32>().ok();
+                }
+                if let Ok(yres) = fs::read_to_string(fb_path.join("yres")) {
+                    h = yres.trim().parse::<u32>().ok();
+                }
+            }
+            if let (Some(w), Some(h)) = (w, h) {
+                return format!("{}x{}", w, h);
+            }
+        }
+        return String::new();
+    }
+
+    // Linux: try reading from DRM
+    let drm_path = Path::new("/sys/class/drm");
+    if let Ok(entries) = fs::read_dir(drm_path) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if !name_str.contains("-") || !name_str.starts_with("card") {
+                continue;
+            }
+            if let Ok(modes) = fs::read_to_string(entry.path().join("modes")) {
+                for mode in modes.lines() {
+                    let mode = mode.trim();
+                    if !mode.is_empty() {
+                        return mode.to_string();
+                    }
+                }
+            }
+        }
+    }
+
     String::new()
 }
 
