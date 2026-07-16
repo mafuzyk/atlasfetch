@@ -344,7 +344,7 @@ impl Editor {
                         let flag_c = theme::flag_color_at(logo_colors, ri, ci, output.rows.len(), logo_width, is_vert);
                         let c = flag_c.unwrap_or_else(|| {
                             let idx = if is_vert { ci } else { ri };
-                            logo_colors.get(idx % logo_colors.len().max(1)).copied().unwrap_or(Color::new(255, 255, 255))
+                            logo_colors.get(theme::mirror_index(idx, logo_colors.len())).copied().unwrap_or(Color::new(255, 255, 255))
                         });
                         if ch != ' ' {
                             spans.push(Span::styled(ch.to_string(), Style::default().fg(tui_color(&c))));

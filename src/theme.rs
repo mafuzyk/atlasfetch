@@ -124,27 +124,36 @@ pub fn all_themes() -> Vec<Theme> {
     ]
 }
 
+/// Mirror (ping-pong) index: 0,1,2,3,4,3,2,1,0,1,2,…
+/// This keeps flag stripes symmetrical even when the art has more rows than colours.
+pub fn mirror_index(i: usize, len: usize) -> usize {
+    if len <= 1 { return 0; }
+    let cycle = len * 2 - 2;
+    let idx = i % cycle;
+    if idx < len { idx } else { cycle - idx }
+}
+
 /// Return a flag-pattern colour for a given position, if the palette matches
 /// a known symbolic flag (e.g. intersex).  `swapped` flips the foreground /
 /// background roles (used by the `v` direction toggle).
 pub fn flag_color_at(colors: &[Color], row: usize, col: usize, total_rows: usize, total_cols: usize, swapped: bool) -> Option<Color> {
     // ── Intersex flag ──────────────────────────────────────────────────
-    // Yellow (#FFD700) background with a purple (#7902AA) circle.
+    // Yellow (#FFD700) background with a purple (#7902AA) ring (outline circle).
     if colors.len() >= 2 {
         let yellow = Color { r: 0xFF, g: 0xD7, b: 0x00 };
         let purple = Color { r: 0x79, g: 0x02, b: 0xAA };
         if (colors[0] == yellow || colors[0] == purple) && (colors[1] == yellow || colors[1] == purple)
             && colors[0] != colors[1]
         {
-            let (bg, circle) = if colors[0] == yellow { (&colors[0], &colors[1]) } else { (&colors[1], &colors[0]) };
+            let (bg, ring) = if colors[0] == yellow { (&colors[0], &colors[1]) } else { (&colors[1], &colors[0]) };
             let r = row as f64 / total_rows.max(1) as f64;
             let c = col as f64 / total_cols.max(1) as f64;
             let dist = ((r - 0.5).powi(2) + (c - 0.5).powi(2)).sqrt();
-            let in_circle = dist < 0.35;
+            let in_ring = dist >= 0.20 && dist < 0.26;
             return Some(if swapped {
-                if in_circle { *bg } else { *circle }
+                if in_ring { *bg } else { *ring }
             } else {
-                if in_circle { *circle } else { *bg }
+                if in_ring { *ring } else { *bg }
             });
         }
     }
