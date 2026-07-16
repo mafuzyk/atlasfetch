@@ -15,7 +15,6 @@ use std::io;
 use unicode_width::UnicodeWidthStr;
 
 use crate::ascii;
-use crate::component;
 use crate::config::{Config, FieldDef};
 use crate::info;
 use crate::layout::AppLayout;
@@ -125,8 +124,7 @@ pub struct Editor {
     app_layout: AppLayout,
     display_mode: DisplayMode,
     mode_selected: usize,
-    scene_selected: usize,
-    mode_focus: bool, // false = display modes, true = scenes
+    mode_focus: bool, // false = display modes, true = layouts
     // Theme
     themes: Vec<theme::Theme>,
     theme_selected: usize,
@@ -231,7 +229,6 @@ impl Editor {
         let layout_selected = AppLayout::pc_variants().iter().position(|l| *l == app_layout).unwrap_or(0);
         let display_mode = DisplayMode::Desktop;
         let mode_selected = 0;
-        let scene_selected = component::Scene::all().iter().position(|s| s.name() == cfg.scene).unwrap_or(0);
         let ascii_selected = match ascii_source.split_once(':') {
             Some(("builtin", k)) => logo_keys.iter().position(|lk| lk == k).unwrap_or(0),
             _ if ascii_source.starts_with("file:") => logo_keys.len(),
@@ -240,7 +237,7 @@ impl Editor {
         };
         let mut ed = Self {
             cfg, info, tab: Tab::Welcome, app_layout, layout_selected,
-            display_mode, mode_selected, scene_selected, mode_focus: false,
+            display_mode, mode_selected, mode_focus: false,
             themes, theme_selected, custom_palette_input: String::new(),
             logo_keys, ascii_art, ascii_source, ascii_selected,
             ascii_search: String::new(), ascii_is_small,
@@ -630,21 +627,21 @@ fn render_mode_tab(frame: &mut Frame, area: Rect, editor: &Editor) {
         .border_style(Style::default().fg(if editor.mode_focus { TuiColor::Rgb(100,100,100) } else { TuiColor::Rgb(157, 133, 255) }));
     frame.render_widget(List::new(mode_items).block(mode_block), halves[0]);
 
-    let scenes = component::Scene::all();
-    let scene_items: Vec<ListItem> = scenes.iter().enumerate().map(|(i, s)| {
-        let sel = editor.mode_focus && i == editor.scene_selected;
+    let layouts = AppLayout::pc_variants();
+    let layout_items: Vec<ListItem> = layouts.iter().enumerate().map(|(i, l)| {
+        let sel = editor.mode_focus && i == editor.layout_selected;
         ListItem::new(Line::from(vec![
             Span::styled(if sel { "▶ " } else { "  " }, Style::default().fg(TuiColor::Rgb(255, 184, 131))),
-            Span::styled(s.name(), if sel { Style::default().fg(TuiColor::Rgb(255,255,255)).add_modifier(Modifier::BOLD) } else { Style::default().fg(TuiColor::Rgb(200,200,200)) }),
+            Span::styled(l.name(), if sel { Style::default().fg(TuiColor::Rgb(255,255,255)).add_modifier(Modifier::BOLD) } else { Style::default().fg(TuiColor::Rgb(200,200,200)) }),
             Span::raw("  "),
-            Span::styled(s.description(), Style::default().fg(TuiColor::Rgb(120,120,120))),
+            Span::styled(l.description(), Style::default().fg(TuiColor::Rgb(120,120,120))),
         ]))
     }).collect();
-    let scene_block = Block::default()
-        .title(" Scene ")
+    let layout_block = Block::default()
+        .title(" Layout ")
         .borders(Borders::ALL).border_type(BorderType::Rounded)
         .border_style(Style::default().fg(if editor.mode_focus { TuiColor::Rgb(157, 133, 255) } else { TuiColor::Rgb(100,100,100) }));
-    frame.render_widget(List::new(scene_items).block(scene_block), halves[1]);
+    frame.render_widget(List::new(layout_items).block(layout_block), halves[1]);
 }
 
 // ── Layout tab ───────────────────────────────────────────────────────────
@@ -677,7 +674,10 @@ fn render_theme_tab(frame: &mut Frame, area: Rect, editor: &Editor) {
         line.extend(swatch);
         ListItem::new(Line::from(line))
     }).collect();
-    frame.render_widget(List::new(items).block(Block::default().title("Theme Presets").borders(Borders::ALL).border_type(BorderType::Rounded).border_style(Style::default().fg(TuiColor::Rgb(255, 154, 152)))), top[0]);
+    let mut state = ratatui::widgets::ListState::default().with_selected(Some(editor.theme_selected));
+    frame.render_stateful_widget(
+        List::new(items).block(Block::default().title("Theme Presets").borders(Borders::ALL).border_type(BorderType::Rounded).border_style(Style::default().fg(TuiColor::Rgb(255, 154, 152)))),
+        top[0], &mut state);
 
     let swatch: Vec<Span> = editor.cfg.logo.colors.iter().map(|c| Span::styled("  ", Style::default().bg(tui_color(c)))).collect();
     frame.render_widget(Paragraph::new(Line::from(swatch)).block(Block::default().title("Current Palette").borders(Borders::ALL).border_type(BorderType::Rounded).border_style(Style::default().fg(TuiColor::Rgb(255, 154, 152)))), top[1]);
@@ -1018,18 +1018,15 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
                 match editor.tab {
                     Tab::Mode => {
                         if editor.mode_focus {
-                            editor.scene_selected = editor.scene_selected.saturating_sub(1);
-                            let scenes = component::Scene::all();
-                            if editor.scene_selected < scenes.len() {
-                                editor.cfg.scene = scenes[editor.scene_selected].name().to_lowercase();
-                                editor.dirty = true;
-                            }
+                            editor.layout_selected = editor.layout_selected.saturating_sub(1);
+                            editor.apply_layout(editor.layout_selected);
                         } else {
                             editor.mode_selected = editor.mode_selected.saturating_sub(1);
                             let modes = DisplayMode::all();
                             if editor.mode_selected < modes.len() {
                                 editor.display_mode = modes[editor.mode_selected];
                                 editor.dirty = true;
+                                editor.refresh_preview();
                             }
                         }
                     }
@@ -1089,13 +1086,9 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
                 match editor.tab {
                     Tab::Mode => {
                         if editor.mode_focus {
-                            let max = component::Scene::all().len().saturating_sub(1);
-                            editor.scene_selected = (editor.scene_selected + 1).min(max);
-                            let scenes = component::Scene::all();
-                            if editor.scene_selected < scenes.len() {
-                                editor.cfg.scene = scenes[editor.scene_selected].name().to_lowercase();
-                                editor.dirty = true;
-                            }
+                            let max = AppLayout::pc_variants().len().saturating_sub(1);
+                            editor.layout_selected = (editor.layout_selected + 1).min(max);
+                            editor.apply_layout(editor.layout_selected);
                         } else {
                             let max = DisplayMode::all().len().saturating_sub(1);
                             editor.mode_selected = (editor.mode_selected + 1).min(max);
@@ -1103,6 +1096,7 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
                             if editor.mode_selected < modes.len() {
                                 editor.display_mode = modes[editor.mode_selected];
                                 editor.dirty = true;
+                                editor.refresh_preview();
                             }
                         }
                     }

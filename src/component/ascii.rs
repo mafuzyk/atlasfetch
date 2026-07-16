@@ -1,3 +1,4 @@
+use unicode_width::UnicodeWidthChar;
 use unicode_width::UnicodeWidthStr;
 
 use super::{Component, RenderCtx, StyledSpan};
@@ -45,10 +46,12 @@ impl Component for AsciiComponent {
         for (i, line) in lines.iter().enumerate() {
             let mut spans = Vec::new();
             if center > 0 { spans.push(StyledSpan::new(" ".repeat(center))); }
-            for (ci, ch) in line.chars().enumerate() {
-                let flag_c = crate::theme::flag_color_at(cols, i, ci, total, max_w, false);
+            let mut col = 0usize;
+            for ch in line.chars() {
+                let w = ch.width().unwrap_or(0);
+                let flag_c = crate::theme::flag_color_at(cols, i, col, total, max_w, false);
                 let color = flag_c.unwrap_or_else(|| {
-                    let idx = if is_vert { ci } else { i };
+                    let idx = if is_vert { col } else { i };
                     cols.get(crate::theme::stretch_index(idx, if is_vert { max_w } else { total }, cols.len()))
                         .copied().unwrap_or(Color::new(255, 255, 255))
                 });
@@ -57,6 +60,7 @@ impl Component for AsciiComponent {
                 } else {
                     spans.push(StyledSpan::new(" "));
                 }
+                col += w;
             }
             let row_w: usize = spans.iter().map(|s| s.text.width()).sum();
             let need = center + max_w;

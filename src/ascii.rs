@@ -16,10 +16,18 @@ use crate::config;
 include!(concat!(env!("OUT_DIR"), "/logos_generated.rs"));
 
 fn clean_ascii(art: &str) -> String {
-    art.lines()
-        .map(|l| l.replace('\u{2800}', " "))
-        .map(|l| l.trim_start().to_string())
-        .map(|l| l.trim_end().to_string())
+    let lines: Vec<&str> = art.lines().collect();
+    if lines.is_empty() { return String::new(); }
+    // Minimum leading U+2800 blanks across all non-empty lines
+    let min_lead = lines.iter()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.chars().take_while(|&c| c == '\u{2800}').count())
+        .min().unwrap_or(0);
+    lines.iter()
+        .map(|l| {
+            let s: String = l.chars().skip(min_lead).collect();
+            s.trim_end().to_string()
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
