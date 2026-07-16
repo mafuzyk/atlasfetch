@@ -331,7 +331,10 @@ impl Config {
             cfg.save()?;
             return Ok(cfg);
         }
-        let raw = fs::read_to_string(&path)?;
+        let raw = match fs::read_to_string(&path) {
+            Ok(r) => r,
+            Err(_) => { bail!("Cannot read config file at {:?}", path); }
+        };
         // Try current format first
         if let Ok(mut cfg) = serde_json::from_str::<Config>(&raw) {
             cfg.display.dedup();
@@ -344,15 +347,21 @@ impl Config {
             cfg.save()?;
             return Ok(cfg);
         }
-        bail!("Cannot parse config file at {:?}", path);
+        // Corrupted config — fall back to defaults and overwrite
+        eprintln!("Warning: config file corrupted at {:?}, resetting to defaults", path);
+        let cfg = Self::default();
+        cfg.save()?;
+        Ok(cfg)
     }
 
     pub fn save(&self) -> Result<()> {
         let dir = config_dir()?;
         fs::create_dir_all(&dir)?;
         let path = dir.join("config.json");
+        let tmp = dir.join("config.json.tmp");
         let json = serde_json::to_string_pretty(self)?;
-        fs::write(&path, json)?;
+        fs::write(&tmp, json)?;
+        fs::rename(&tmp, &path)?;
         Ok(())
     }
 

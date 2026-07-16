@@ -1332,6 +1332,10 @@ pub fn run(cfg: &mut Config) -> Result<()> {
         cfg.logo = editor.cfg.logo.clone();
         cfg.panel = editor.cfg.panel.clone();
         cfg.display = editor.cfg.display.clone();
+        cfg.scene = editor.cfg.scene.clone();
+        cfg.title = editor.cfg.title.clone();
+        cfg.separator = editor.cfg.separator.clone();
+        cfg.palette = editor.cfg.palette.clone();
     }
 
     terminal::disable_raw_mode()?;
