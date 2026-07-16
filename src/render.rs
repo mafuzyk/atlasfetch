@@ -437,10 +437,11 @@ pub fn render_mobile(cfg: &Config, info: &SysInfo, ascii_art: &str, is_narrow: b
             } else {
                 Color::new(255, 255, 255)
             };
-            let center = term_width.saturating_sub(line.trim_end().width()) / 2;
+            let trimmed = line.trim_end();
+            let center = term_width.saturating_sub(trimmed.width()) / 2;
             let mut row = String::new();
             row.push_str(&" ".repeat(center));
-            for ch in line.chars() {
+            for ch in trimmed.chars() {
                 if ch != ' ' {
                     row.push_str(&format!("{}{}", logo_color.fg_escape(), ch));
                 } else {
@@ -524,11 +525,12 @@ pub fn render_mobile_preview(cfg: &Config, info: &SysInfo, ascii_art: &str, term
             } else {
                 Color::new(255, 255, 255)
             };
-            let center = tw.saturating_sub(line.trim_end().width()) / 2;
+            let trimmed = line.trim_end();
+            let center = tw.saturating_sub(trimmed.width()) / 2;
             let mut segs = vec![
                 StyledSegment { text: " ".repeat(center), fg: None, bg: None, bold: false },
             ];
-            for ch in line.chars() {
+            for ch in trimmed.chars() {
                 if ch != ' ' {
                     segs.push(StyledSegment { text: ch.to_string(), fg: Some(logo_color), bg: None, bold: false });
                 } else {
