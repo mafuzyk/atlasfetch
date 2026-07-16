@@ -421,7 +421,8 @@ pub fn render_ascii_only(cfg: &Config, ascii_art: &str) -> String {
         let color = cfg.logo.colors.get(i % cfg.logo.colors.len()).unwrap_or(&base);
         let trimmed = line.trim_end();
         out.push_str(&" ".repeat(center));
-        for ch in trimmed.chars() {
+        let padded = format!("{:w$}", trimmed, w = max_w);
+        for ch in padded.chars() {
             if ch != ' ' {
                 out.push_str(&format!("{}{}", color.fg_escape(), ch));
             } else {
@@ -487,6 +488,8 @@ pub fn render_mobile(cfg: &Config, info: &SysInfo, ascii_art: &str, is_narrow: b
 
     // ── ASCII header block ──
     if !logo_lines.is_empty() {
+        let logo_width = logo_lines.iter().map(|l| l.trim_end().width()).max().unwrap_or(0);
+        let block_center = term_width.saturating_sub(logo_width) / 2;
         for (i, line) in logo_lines.iter().enumerate() {
             let logo_color = if !cfg.logo.colors.is_empty() {
                 cfg.logo.colors[i % cfg.logo.colors.len()]
@@ -494,10 +497,11 @@ pub fn render_mobile(cfg: &Config, info: &SysInfo, ascii_art: &str, is_narrow: b
                 Color::new(255, 255, 255)
             };
             let trimmed = line.trim_end();
-            let center = term_width.saturating_sub(trimmed.width()) / 2;
             let mut row = String::new();
-            row.push_str(&" ".repeat(center));
-            for ch in trimmed.chars() {
+            row.push_str(&" ".repeat(block_center));
+            // Right-pad shorter lines to match block width
+            let padded = format!("{:w$}", trimmed, w = logo_width);
+            for ch in padded.chars() {
                 if ch != ' ' {
                     row.push_str(&format!("{}{}", logo_color.fg_escape(), ch));
                 } else {
@@ -576,6 +580,8 @@ pub fn render_mobile_preview(cfg: &Config, info: &SysInfo, ascii_art: &str, term
 
     // ── ASCII header block ──
     if !logo_lines.is_empty() {
+        let logo_width = logo_lines.iter().map(|l| l.trim_end().width()).max().unwrap_or(0);
+        let block_center = tw.saturating_sub(logo_width) / 2;
         for (i, line) in logo_lines.iter().enumerate() {
             let logo_color = if !cfg.logo.colors.is_empty() {
                 cfg.logo.colors[i % cfg.logo.colors.len()]
@@ -583,11 +589,11 @@ pub fn render_mobile_preview(cfg: &Config, info: &SysInfo, ascii_art: &str, term
                 Color::new(255, 255, 255)
             };
             let trimmed = line.trim_end();
-            let center = tw.saturating_sub(trimmed.width()) / 2;
             let mut segs = vec![
-                StyledSegment { text: " ".repeat(center), fg: None, bg: None, bold: false },
+                StyledSegment { text: " ".repeat(block_center), fg: None, bg: None, bold: false },
             ];
-            for ch in trimmed.chars() {
+            let padded = format!("{:w$}", trimmed, w = logo_width);
+            for ch in padded.chars() {
                 if ch != ' ' {
                     segs.push(StyledSegment { text: ch.to_string(), fg: Some(logo_color), bg: None, bold: false });
                 } else {
