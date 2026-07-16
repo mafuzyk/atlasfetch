@@ -124,6 +124,33 @@ pub fn all_themes() -> Vec<Theme> {
     ]
 }
 
+/// Return a flag-pattern colour for a given position, if the palette matches
+/// a known symbolic flag (e.g. intersex).  `swapped` flips the foreground /
+/// background roles (used by the `v` direction toggle).
+pub fn flag_color_at(colors: &[Color], row: usize, col: usize, total_rows: usize, total_cols: usize, swapped: bool) -> Option<Color> {
+    // ── Intersex flag ──────────────────────────────────────────────────
+    // Yellow (#FFD700) background with a purple (#7902AA) circle.
+    if colors.len() >= 2 {
+        let yellow = Color { r: 0xFF, g: 0xD7, b: 0x00 };
+        let purple = Color { r: 0x79, g: 0x02, b: 0xAA };
+        if (colors[0] == yellow || colors[0] == purple) && (colors[1] == yellow || colors[1] == purple)
+            && colors[0] != colors[1]
+        {
+            let (bg, circle) = if colors[0] == yellow { (&colors[0], &colors[1]) } else { (&colors[1], &colors[0]) };
+            let r = row as f64 / total_rows.max(1) as f64;
+            let c = col as f64 / total_cols.max(1) as f64;
+            let dist = ((r - 0.5).powi(2) + (c - 0.5).powi(2)).sqrt();
+            let in_circle = dist < 0.35;
+            return Some(if swapped {
+                if in_circle { *bg } else { *circle }
+            } else {
+                if in_circle { *circle } else { *bg }
+            });
+        }
+    }
+    None
+}
+
 #[allow(dead_code)]
 pub fn find_theme(name: &str) -> Option<Theme> {
     all_themes().into_iter().find(|t| t.name == name)

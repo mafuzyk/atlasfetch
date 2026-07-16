@@ -234,8 +234,11 @@ pub fn render_ascii_only(cfg: &Config, ascii_art: &str) -> String {
         out.push_str(&" ".repeat(center));
         let padded = format!("{:w$}", trimmed, w = max_w);
         for (ci, ch) in padded.chars().enumerate() {
-            let idx = if is_vert { ci } else { i };
-            let color = cfg.logo.colors.get(idx % cfg.logo.colors.len()).unwrap_or(&base);
+            let flag_c = crate::theme::flag_color_at(&cfg.logo.colors, i, ci, lines.len(), max_w, is_vert);
+            let color = flag_c.as_ref().unwrap_or_else(|| {
+                let idx = if is_vert { ci } else { i };
+                cfg.logo.colors.get(idx % cfg.logo.colors.len()).unwrap_or(&base)
+            });
             if ch != ' ' {
                 out.push_str(&format!("{}{}", color.fg_escape(), ch));
             } else {
