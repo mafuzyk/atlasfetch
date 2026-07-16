@@ -334,10 +334,14 @@ fn handle_event(app: &mut App) -> Result<bool> {
             if key.kind != KeyEventKind::Press {
                 return Ok(true);
             }
-            // Esc closes preview overlay if open
-            if key.code == KeyCode::Esc && app.show_preview {
-                app.show_preview = false;
-                return Ok(true);
+            if app.show_preview {
+                match key.code {
+                    KeyCode::Esc | KeyCode::Backspace | KeyCode::Char('q') => {
+                        app.show_preview = false;
+                        return Ok(true);
+                    }
+                    _ => return Ok(true),
+                }
             }
             match app.input_mode {
                 InputMode::EditingPastedAscii => {
@@ -551,7 +555,14 @@ fn handle_event(app: &mut App) -> Result<bool> {
                                     app.step = Step::Theme;
                                     app.theme_list_state.select(Some(0));
                                 }
+                                KeyCode::Right | KeyCode::Char('l') if app.is_mobile => {
+                                    app.step = Step::Theme;
+                                    app.theme_list_state.select(Some(0));
+                                }
                                 KeyCode::Esc | KeyCode::Char('q') => {
+                                    app.quit = true;
+                                }
+                                KeyCode::Backspace if app.is_mobile => {
                                     app.quit = true;
                                 }
                                 _ => {}
@@ -587,12 +598,23 @@ fn handle_event(app: &mut App) -> Result<bool> {
                                         app.step = next;
                                     }
                                 }
+                                KeyCode::Char('l') if app.is_mobile => {
+                                    if let Some(next) = app.step.next() {
+                                        app.step = next;
+                                    }
+                                }
                                 KeyCode::Left => {
                                     if let Some(prev) = app.step.prev() {
                                         app.step = prev;
                                     }
                                 }
-                                KeyCode::Esc => { app.quit = true; }
+                                KeyCode::Char('h') if app.is_mobile => {
+                                    if let Some(prev) = app.step.prev() {
+                                        app.step = prev;
+                                    }
+                                }
+                                KeyCode::Esc | KeyCode::Char('q') => { app.quit = true; }
+                                KeyCode::Backspace if app.is_mobile => { app.quit = true; }
                                 _ => {}
                             }
                         }
@@ -641,12 +663,23 @@ fn handle_event(app: &mut App) -> Result<bool> {
                                         app.step = next;
                                     }
                                 }
+                                KeyCode::Char('l') if app.is_mobile => {
+                                    if let Some(next) = app.step.next() {
+                                        app.step = next;
+                                    }
+                                }
                                 KeyCode::Left => {
                                     if let Some(prev) = app.step.prev() {
                                         app.step = prev;
                                     }
                                 }
-                                KeyCode::Esc => { app.quit = true; }
+                                KeyCode::Char('h') if app.is_mobile => {
+                                    if let Some(prev) = app.step.prev() {
+                                        app.step = prev;
+                                    }
+                                }
+                                KeyCode::Esc | KeyCode::Char('q') => { app.quit = true; }
+                                KeyCode::Backspace if app.is_mobile => { app.quit = true; }
                                 _ => {}
                             }
                         }
@@ -670,17 +703,17 @@ fn handle_event(app: &mut App) -> Result<bool> {
                                         apply_layout(app, i - 1);
                                     }
                                 }
-                                KeyCode::Enter | KeyCode::Tab | KeyCode::Right => {
+                                KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
                                     if let Some(next) = app.step.next() {
                                         app.step = next;
                                     }
                                 }
-                                KeyCode::Left => {
+                                KeyCode::Left | KeyCode::Char('h') => {
                                     if let Some(prev) = app.step.prev() {
                                         app.step = prev;
                                     }
                                 }
-                                KeyCode::Esc => { app.quit = true; }
+                                KeyCode::Esc | KeyCode::Backspace | KeyCode::Char('q') => { app.quit = true; }
                                 _ => {}
                             }
                         }
@@ -689,7 +722,7 @@ fn handle_event(app: &mut App) -> Result<bool> {
                                 KeyCode::Char('p') if app.is_mobile => {
                                     app.show_preview = !app.show_preview;
                                 }
-                                KeyCode::Tab => {
+                                KeyCode::Tab | KeyCode::Char('[') | KeyCode::Char(']') => {
                                     // Toggle between left and right panel
                                     app.panel_focus = match app.panel_focus {
                                         PanelFocus::Left => PanelFocus::Right,
@@ -728,7 +761,7 @@ fn handle_event(app: &mut App) -> Result<bool> {
                                         }
                                     }
                                 }
-                                KeyCode::Char(' ') => {
+                                KeyCode::Char(' ') | KeyCode::Char('x') => {
                                     // Toggle enabled/disabled
                                     match app.panel_focus {
                                         PanelFocus::Left => {
@@ -838,12 +871,23 @@ fn handle_event(app: &mut App) -> Result<bool> {
                                         app.step = next;
                                     }
                                 }
+                                KeyCode::Char('l') if app.is_mobile => {
+                                    if let Some(next) = app.step.next() {
+                                        app.step = next;
+                                    }
+                                }
                                 KeyCode::Left => {
                                     if let Some(prev) = app.step.prev() {
                                         app.step = prev;
                                     }
                                 }
-                                KeyCode::Esc => { app.quit = true; }
+                                KeyCode::Char('h') if app.is_mobile => {
+                                    if let Some(prev) = app.step.prev() {
+                                        app.step = prev;
+                                    }
+                                }
+                                KeyCode::Esc | KeyCode::Char('q') => { app.quit = true; }
+                                KeyCode::Backspace if app.is_mobile => { app.quit = true; }
                                 _ => {}
                             }
                         }
@@ -895,10 +939,18 @@ fn handle_event(app: &mut App) -> Result<bool> {
                                         }
                                     }
                                 }
-                                KeyCode::Char('n') | KeyCode::Esc => {
+                                KeyCode::Char('n') | KeyCode::Esc | KeyCode::Char('q') => {
+                                    app.quit = true;
+                                }
+                                KeyCode::Backspace if app.is_mobile => {
                                     app.quit = true;
                                 }
                                 KeyCode::Left => {
+                                    if let Some(prev) = app.step.prev() {
+                                        app.step = prev;
+                                    }
+                                }
+                                KeyCode::Char('h') if app.is_mobile => {
                                     if let Some(prev) = app.step.prev() {
                                         app.step = prev;
                                     }
@@ -1696,57 +1748,87 @@ fn render_ascii_only_preview(frame: &mut Frame, area: Rect, app: &App) {
 
 fn render_footer(frame: &mut Frame, area: Rect, app: &App) {
     if app.show_preview {
-        let footer = Paragraph::new(Span::raw(" [Esc] Close preview"))
+        let hint = if app.is_mobile { " [q/Backspace] Close preview" } else { " [Esc] Close preview" };
+        let footer = Paragraph::new(Span::raw(hint))
             .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded));
         frame.render_widget(footer, area);
         return;
     }
 
-    let nav = match app.step {
-        Step::Welcome => " [Enter/Space] Begin  |  [q/Esc] Quit".to_string(),
-        Step::Theme => {
-            let extra = if app.input_mode == InputMode::EditingCustomPalette {
-                "  [Enter] apply  [Esc] cancel".to_string()
-            } else {
-                let mut s = "  [c] custom palette".to_string();
-                if app.is_mobile { s.push_str("  [p] preview"); }
-                s
-            };
-            format!(" [←] Back  |  [→/Tab] Next  {}", extra)
-        }
-        Step::Ascii | Step::Layout | Step::Panels => {
-            let prev = if app.step.prev().is_some() { "[←] Back" } else { "" };
-            let next = if app.step.next().is_some() { "[→/Tab] Next" } else { "[Enter] Save" };
-            let extra = match app.step {
-                Step::Ascii => {
-                    if app.input_mode == InputMode::BrowsingFile {
-                        "  [~] home  [Backspace] up  [Enter] select  [Esc] cancel".to_string()
-                    } else {
-                        let mut s = "  [c]ustom  [p]aste  [d]isable".to_string();
-                        if app.is_mobile { s.push_str("  [p] preview"); }
-                        s
+    let nav = if app.is_mobile {
+        match app.step {
+            Step::Welcome => " [Enter] Begin  |  [q] Quit".to_string(),
+            Step::Theme => {
+                let extra = if app.input_mode == InputMode::EditingCustomPalette {
+                    "  [Enter] apply  [Backspace] cancel".to_string()
+                } else {
+                    "  [c] custom palette  [p] preview".to_string()
+                };
+                format!(" [h] Back  |  [l] Next  {}", extra)
+            }
+            Step::Ascii | Step::Layout | Step::Panels => {
+                let prev = if app.step.prev().is_some() { "[h] Back" } else { "" };
+                let next = if app.step.next().is_some() { "[l] Next" } else { "[Enter] Save" };
+                let extra = match app.step {
+                    Step::Ascii => {
+                        if app.input_mode == InputMode::BrowsingFile {
+                            "  [~] home  [Backspace] up  [Enter] select  [q] cancel".to_string()
+                        } else {
+                            "  [c]ustom  [p]aste  [d]isable  [p] preview".to_string()
+                        }
                     }
-                }
-                                Step::Panels => {
-                    if app.input_mode == InputMode::AddingPanel {
-                        "  [↑/↓] navigate  [Enter] add  [Esc] cancel".to_string()
-                    } else {
-                        "  [Space] toggle  [r] reorder up  [e] edit  [a] add  [d] delete  [Tab] switch".to_string()
+                    Step::Panels => {
+                        if app.input_mode == InputMode::AddingPanel {
+                            "  [↑/↓] navigate  [Enter] add  [q] cancel".to_string()
+                        } else {
+                            "  [x] toggle  [r] reorder  [e] edit  [a] add  [d] delete  [/] switch  [p] preview".to_string()
+                        }
                     }
-                }
-                Step::Layout => {
-                    let mut s = String::new();
-                    if app.is_mobile { s.push_str("  [p] preview"); }
-                    s
-                }
-                _ => String::new(),
-            };
-            format!(" {}  |  {}  {}", prev, next, extra)
+                    Step::Layout => "  [p] preview".to_string(),
+                    _ => String::new(),
+                };
+                format!(" {}  |  {}  {}", prev, next, extra)
+            }
+            Step::Summary => {
+                " [Enter/s] Save  |  [n/q] Discard  [p] preview".to_string()
+            }
         }
-        Step::Summary => {
-            let mut s = " [Enter/s] Save & exit  |  [n/Esc] Discard & exit".to_string();
-            if app.is_mobile { s.push_str("  [p] preview"); }
-            s
+    } else {
+        match app.step {
+            Step::Welcome => " [Enter/Space] Begin  |  [q/Esc] Quit".to_string(),
+            Step::Theme => {
+                let extra = if app.input_mode == InputMode::EditingCustomPalette {
+                    "  [Enter] apply  [Esc] cancel".to_string()
+                } else {
+                    "  [c] custom palette".to_string()
+                };
+                format!(" [←] Back  |  [→/Tab] Next  {}", extra)
+            }
+            Step::Ascii | Step::Layout | Step::Panels => {
+                let prev = if app.step.prev().is_some() { "[←] Back" } else { "" };
+                let next = if app.step.next().is_some() { "[→/Tab] Next" } else { "[Enter] Save" };
+                let extra = match app.step {
+                    Step::Ascii => {
+                        if app.input_mode == InputMode::BrowsingFile {
+                            "  [~] home  [Backspace] up  [Enter] select  [Esc] cancel".to_string()
+                        } else {
+                            "  [c]ustom  [p]aste  [d]isable".to_string()
+                        }
+                    }
+                    Step::Panels => {
+                        if app.input_mode == InputMode::AddingPanel {
+                            "  [↑/↓] navigate  [Enter] add  [Esc] cancel".to_string()
+                        } else {
+                            "  [Space] toggle  [r] reorder up  [e] edit  [a] add  [d] delete  [Tab] switch".to_string()
+                        }
+                    }
+                    _ => String::new(),
+                };
+                format!(" {}  |  {}  {}", prev, next, extra)
+            }
+            Step::Summary => {
+                " [Enter/s] Save & exit  |  [n/Esc] Discard & exit".to_string()
+            }
         }
     };
 
