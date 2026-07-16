@@ -18,18 +18,36 @@ use clap::Parser;
 use color_eyre::Result;
 use std::process::Command;
 
-fn update_atlasfetch() -> Result<()> {
-    let src = std::env::var("ATLASFETCH_SRC").unwrap_or_else(|_| {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-        format!("{}/atlasfetch", home)
-    });
+fn detect_src_dir() -> String {
+    if let Ok(dir) = std::env::var("ATLASFETCH_SRC") {
+        return dir;
+    }
+    // Try to find source from the binary's own path
+    if let Ok(exe) = std::env::current_exe() {
+        let mut path = exe.parent().unwrap_or(std::path::Path::new("/"));
+        for _ in 0..5 {
+            if path.join("Cargo.toml").exists() && path.join(".git").exists() {
+                return path.to_string_lossy().to_string();
+            }
+            if let Some(parent) = path.parent() {
+                path = parent;
+            } else {
+                break;
+            }
+        }
+    }
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    format!("{}/atlasfetch", home)
+}
 
+fn update_atlasfetch() -> Result<()> {
+    let src = detect_src_dir();
     println!("📦 atlasfetch update — source: {}", src);
 
     // git pull
     println!("→ Pulling latest source...");
     let status = Command::new("git")
-        .args(["-C", &src, "pull", "--rebase"])
+        .args(["-C", &src, "pull", "--rebase", "--autostash"])
         .status()
         .map_err(|e| color_eyre::eyre::eyre!("Failed to run git: {}. Is git installed?", e))?;
 
