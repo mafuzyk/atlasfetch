@@ -782,8 +782,14 @@ fn render_preview_panel(frame: &mut Frame, area: Rect, editor: &Editor) {
 // ── Event handling ───────────────────────────────────────────────────────
 
 fn handle_event(editor: &mut Editor) -> Result<bool> {
-    if let Event::Key(key) = event::read()? {
-        if key.kind != KeyEventKind::Press { return Ok(true); }
+    match event::read()? {
+        Event::Resize(w, h) => {
+            editor.term_width = w;
+            editor.term_height = h;
+            editor.preview_width = (w.saturating_sub(20)) as usize;
+            editor.dirty = true;
+        }
+        Event::Key(key) if key.kind == KeyEventKind::Press => {
 
         // Handle input modes first
         match editor.input_mode {
@@ -1170,6 +1176,8 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
             _ => {}
         }
     }
+    _ => {}
+}
     if editor.dirty { editor.refresh_preview(); }
     Ok(true)
 }
