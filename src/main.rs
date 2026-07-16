@@ -105,13 +105,26 @@ fn update_atlasfetch() -> Result<()> {
     }
 
     println!("→ Installing to {}...", dest);
-    let status = Command::new("cp")
-        .args([&binary, &dest])
-        .status()?;
+    // Use install(1) which handles running binaries via temp+rename
+    // Fallback to cp -f + atomic rename
+    let status = Command::new("install")
+        .args(["-m", "755", &binary, &dest])
+        .status()
+        .or_else(|_| {
+            // cp fallback: copy to temp then rename (atomic)
+            let tmp = format!("{}.new", dest);
+            Command::new("cp").args([&binary, &tmp]).status().and_then(|s| {
+                if s.success() {
+                    Command::new("mv").args([&tmp, &dest]).status()
+                } else {
+                    Ok(s)
+                }
+            })
+        })?;
 
     if !status.success() {
         color_eyre::eyre::bail!(
-            "Failed to copy binary to {}. Make sure the directory exists and is writable.",
+            "Failed to install binary to {}. Make sure the directory exists and is writable.",
             dest
         );
     }
