@@ -400,6 +400,28 @@ pub fn render_preview(cfg: &Config, info: &SysInfo, ascii_art: &str, term_width:
     lines
 }
 
+// ── Mobile ASCII compaction ──────────────────────────────────────────────
+
+/// Compact ASCII art for mobile: if the art is too large, replace with a
+/// small header. Returns lines ready for rendering.
+fn compact_for_mobile(ascii_art: &str) -> Vec<String> {
+    let lines: Vec<&str> = ascii_art.lines().collect();
+    let n = lines.len();
+    let max_w = lines.iter().map(|l| l.trim_end().width()).max().unwrap_or(0);
+
+    // Small enough: use as-is
+    if n <= 8 && max_w <= 35 {
+        return lines.iter().map(|l| l.to_string()).collect();
+    }
+
+    // Too big: compact to a small centered header
+    vec![
+        "  ▄▀▀▀▀▀▀▀▀▄".into(),
+        " █  ◢ ATLAS ◣  █".into(),
+        "  ▀▀▀▀▀▀▀▀▀▀".into(),
+    ]
+}
+
 // ── Mobile renderer (ASCII left + panels right, or single column) ──────────
 
 /// Render fetch output for mobile/narrow terminals.
@@ -407,10 +429,11 @@ pub fn render_mobile(cfg: &Config, info: &SysInfo, ascii_art: &str, is_narrow: b
     let term_width = terminal_width();
     let mut out = String::new();
 
+    let compacted = compact_for_mobile(ascii_art);
     let logo_lines: Vec<&str> = if ascii_art.is_empty() || is_narrow {
         Vec::new()
     } else {
-        ascii_art.lines().collect()
+        compacted.iter().map(|s| s.as_str()).collect()
     };
 
     // Merge all enabled fields into a single list
@@ -485,10 +508,11 @@ pub fn render_mobile_preview(cfg: &Config, info: &SysInfo, ascii_art: &str, term
     let tw = term_width as usize;
     let mut lines = Vec::new();
 
+    let compacted = compact_for_mobile(ascii_art);
     let logo_lines: Vec<&str> = if ascii_art.is_empty() || is_narrow {
         Vec::new()
     } else {
-        ascii_art.lines().collect()
+        compacted.iter().map(|s| s.as_str()).collect()
     };
 
     let all_fields: Vec<&FieldDef> = cfg.display.left.iter()
