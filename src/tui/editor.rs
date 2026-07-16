@@ -12,10 +12,13 @@ use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph};
 use ratatui::Frame;
 use ratatui::Terminal;
 use std::io;
+use unicode_width::UnicodeWidthStr;
 
 use crate::config::Config;
 use crate::info;
 use crate::layout_engine::{self, Layout as EngineLayout};
+use crate::render::StyledSegment;
+use crate::theme::Color;
 use crate::widget::{Registry, Widget};
 
 // ── Editor state ─────────────────────────────────────────────────────────
@@ -26,7 +29,7 @@ pub struct Editor {
     engine_layout: EngineLayout,
     registry: Registry,
     widget_order: Vec<String>,
-    preview_lines: Vec<String>,
+    preview_lines: Vec<Line<'static>>,
     ascii_art: String,
     term_width: u16,
     term_height: u16,
@@ -69,7 +72,6 @@ impl Editor {
         let tw = self.term_width as usize;
         let engine = layout_engine::engine_for(self.engine_layout);
 
-        // Build widgets list in order
         let widgets: Vec<&dyn Widget> = self.widget_order.iter()
             .filter_map(|key| self.registry.get(key))
             .collect();
@@ -83,90 +85,96 @@ impl Editor {
 
         let output = engine.arrange(&widgets, &ascii_lines, &self.cfg, &self.info, tw);
 
-        // Convert to styled preview lines
-        self.preview_lines = render_layout_preview(&output, &ascii_lines, tw, self.term_height as usize);
+        // Convert layout output to styled Lines for ratatui
+        let mut lines: Vec<Line> = Vec::new();
+
+        // Title
+        if !output.title.is_empty() {
+            let color = tui_color(&Color::from_hex_opt("#FF9A98").unwrap_or(Color::new(255, 154, 152)));
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(output.title.clone(), Style::default().fg(color).add_modifier(Modifier::BOLD)),
+            ]));
+        }
+
+        // Separator
+        if !output.separator.is_empty() {
+            let color = tui_color(&Color::from_hex_opt("#9D85FF").unwrap_or(Color::new(157, 133, 255)));
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(output.separator.clone(), Style::default().fg(color)),
+            ]));
+        }
+
+        // Logo block width for centering
+        let logo_width = ascii_lines.iter()
+            .map(|l| l.trim_end().width())
+            .max()
+            .unwrap_or(0);
+
+        // Rows
+        for row in &output.rows {
+            let mut spans: Vec<Span> = Vec::new();
+
+            // Logo line
+            if let Some(logo) = &row.logo_line {
+                let center = tw.saturating_sub(logo_width) / 2;
+                if center > 0 {
+                    spans.push(Span::raw(" ".repeat(center)));
+                }
+                spans.push(Span::raw(logo.clone()));
+            }
+
+            // Left widgets
+            for w in &row.left_widgets {
+                spans.extend(styled_to_spans(&w.styled));
+            }
+
+            // Right widgets
+            for w in &row.right_widgets {
+                let span_width: usize = spans.iter().map(|s| s.content.width()).sum();
+                let remaining = tw.saturating_sub(span_width + w.width);
+                if remaining > 0 {
+                    spans.push(Span::raw(" ".repeat(remaining)));
+                }
+                spans.extend(styled_to_spans(&w.styled));
+            }
+
+            if !spans.is_empty() {
+                lines.push(Line::from(spans));
+            }
+
+            if lines.len() >= self.term_height as usize {
+                break;
+            }
+        }
+
+        self.preview_lines = lines;
         self.dirty = false;
     }
 }
 
-// ── Render preview to styled lines ───────────────────────────────────────
+// ── Helpers for ratatui color conversion ─────────────────────────────────
 
-fn render_layout_preview(
-    output: &layout_engine::LayoutOutput,
-    ascii_lines: &[String],
-    term_width: usize,
-    max_height: usize,
-) -> Vec<String> {
-    use crate::theme::Color;
-    use unicode_width::UnicodeWidthStr;
-    let mut lines = Vec::new();
-    let reset = "\x1b[0m";
-    let bold = "\x1b[1m";
-
-    // Title
-    if !output.title.is_empty() {
-        let title_color = Color::from_hex_opt("#FF9A98").unwrap_or(Color::new(255, 154, 152));
-        lines.push(format!("{}  {}{}{}{}", title_color.fg_escape(), bold, output.title, reset, reset));
-    }
-
-    // Separator
-    if !output.separator.is_empty() {
-        let sep_color = Color::from_hex_opt("#9D85FF").unwrap_or(Color::new(157, 133, 255));
-        lines.push(format!("{}  {}{}{}", sep_color.fg_escape(), output.separator, reset, reset));
-    }
-
-    // Logo block width for centering
-    let logo_width = ascii_lines.iter()
-        .map(|l| l.trim_end().width())
-        .max()
-        .unwrap_or(0);
-
-    // Rows
-    for row in &output.rows {
-        let mut line = String::new();
-
-        // Logo line
-        if let Some(logo) = &row.logo_line {
-            let center = term_width.saturating_sub(logo_width) / 2;
-            line.push_str(&" ".repeat(center));
-            // Use a neutral color for logo in preview
-            line.push_str(logo);
-        }
-
-        // Left widget
-        for w in &row.left_widgets {
-            line.push_str(&w.ansi);
-        }
-
-        // Right widget
-        for w in &row.right_widgets {
-            let rv = line.width();
-            let remaining = term_width.saturating_sub(rv + w.width);
-            if remaining > 0 {
-                line.push_str(&" ".repeat(remaining));
-            }
-            line.push_str(&w.ansi);
-        }
-
-        // Try to pad to term_width
-        let vis = line.width();
-        if vis < term_width {
-            line.push_str(&" ".repeat(term_width.saturating_sub(vis)));
-        }
-
-        if !line.trim().is_empty() {
-            lines.push(line);
-        }
-
-        if lines.len() >= max_height {
-            break;
-        }
-    }
-
-    lines
+fn tui_color(c: &Color) -> TuiColor {
+    TuiColor::Rgb(c.r, c.g, c.b)
 }
 
-// ── TUI rendering ────────────────────────────────────────────────────────
+fn styled_to_spans(segs: &[StyledSegment]) -> Vec<Span<'static>> {
+    segs.iter().map(|s| {
+        let mut style = Style::default();
+        if let Some(fg) = &s.fg {
+            style = style.fg(tui_color(fg));
+        }
+        if let Some(bg) = &s.bg {
+            style = style.bg(tui_color(bg));
+        }
+        if s.bold {
+            style = style.add_modifier(Modifier::BOLD);
+        }
+        Span::styled(s.text.clone(), style)
+    }).collect()
+}
 
 fn render_editor(frame: &mut Frame, editor: &mut Editor) {
     let area = frame.area();
@@ -259,11 +267,8 @@ fn render_preview_panel(frame: &mut Frame, area: Rect, editor: &Editor) {
 
     frame.render_widget(block, area);
 
-    // Render preview lines
-    let lines: Vec<Line> = editor.preview_lines.iter().map(|l| {
-        Line::from(Span::raw(l.clone()))
-    }).collect();
-    let preview = Paragraph::new(Text::from(lines))
+    // Render preview lines directly (they are already ratatui Lines)
+    let preview = Paragraph::new(Text::from(editor.preview_lines.clone()))
         .style(Style::default().fg(TuiColor::Rgb(200, 200, 200)));
     frame.render_widget(preview, inner);
 }
