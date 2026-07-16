@@ -222,7 +222,7 @@ fn main() -> Result<()> {
         use component::Component;
         let ascii_comp = component::ascii::AsciiComponent::new(ascii_art.clone());
         let system_comp = component::system::SystemComponent;
-        let monitor_comp = component::monitor::MonitorComponent;
+        let monitor_comp = component::monitor::MonitorComponent::new();
         let comps: Vec<&dyn Component> = vec![&ascii_comp, &system_comp, &monitor_comp];
         print!("{}", component::render_scene_ansi(scene, &comps, &ctx));
         return Ok(());
@@ -284,7 +284,7 @@ fn main() -> Result<()> {
         use component::Component;
         let ascii_comp = component::ascii::AsciiComponent::new(ascii_art.clone());
         let system_comp = component::system::SystemComponent;
-        let monitor_comp = component::monitor::MonitorComponent;
+        let monitor_comp = component::monitor::MonitorComponent::new();
         let companion_comp = component::companion::CompanionComponent;
         let components: Vec<&dyn Component> = vec![&ascii_comp, &system_comp, &monitor_comp, &companion_comp];
         component::render_scene_ansi(scene, &components, &ctx)

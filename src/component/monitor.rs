@@ -1,7 +1,23 @@
 use super::{Component, RenderCtx, StyledSpan};
 use crate::theme::Color;
+use std::fs;
+use std::path::Path;
+use std::sync::Mutex;
 
-pub struct MonitorComponent;
+struct CpuSnapshot {
+    total: u64,
+    idle: u64,
+}
+
+pub struct MonitorComponent {
+    cpu_snapshot: Mutex<Option<CpuSnapshot>>,
+}
+
+impl MonitorComponent {
+    pub fn new() -> Self {
+        Self { cpu_snapshot: Mutex::new(None) }
+    }
+}
 
 fn bar(pct: f64, width: usize) -> String {
     let filled = (pct * width as f64).round() as usize;
@@ -32,6 +48,151 @@ fn render_line(label: &str, value: &str, color: Color) -> Vec<StyledSpan> {
     ]
 }
 
+fn read_stat() -> Option<(u64, u64)> {
+    let content = fs::read_to_string("/proc/stat").ok()?;
+    let line = content.lines().next()?;
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.len() < 5 { return None; }
+    let user: u64 = parts.get(1)?.parse().ok()?;
+    let nice: u64 = parts.get(2)?.parse().ok()?;
+    let system: u64 = parts.get(3)?.parse().ok()?;
+    let idle: u64 = parts.get(4)?.parse().ok()?;
+    let iowait: u64 = parts.get(5).and_then(|s| s.parse().ok()).unwrap_or(0);
+    let irq: u64 = parts.get(6).and_then(|s| s.parse().ok()).unwrap_or(0);
+    let softirq: u64 = parts.get(7).and_then(|s| s.parse().ok()).unwrap_or(0);
+    let steal: u64 = parts.get(8).and_then(|s| s.parse().ok()).unwrap_or(0);
+    let total = user + nice + system + idle + iowait + irq + softirq + steal;
+    Some((total, idle))
+}
+
+fn read_live_cpu_pct(snapshot: &Mutex<Option<CpuSnapshot>>) -> f64 {
+    let cur = match read_stat() {
+        Some(v) => v,
+        None => return 0.0,
+    };
+    let mut guard = snapshot.lock().unwrap();
+    if let Some(prev) = guard.as_ref() {
+        let dtotal = cur.0.saturating_sub(prev.total);
+        let didle = cur.1.saturating_sub(prev.idle);
+        *guard = Some(CpuSnapshot { total: cur.0, idle: cur.1 });
+        if dtotal == 0 { return 0.0; }
+        (dtotal.saturating_sub(didle)) as f64 / dtotal as f64
+    } else {
+        *guard = Some(CpuSnapshot { total: cur.0, idle: cur.1 });
+        0.0
+    }
+}
+
+fn read_live_cpu_temp() -> f64 {
+    let thermal = Path::new("/sys/class/thermal");
+    let entries = match fs::read_dir(thermal) {
+        Ok(e) => e,
+        Err(_) => return 0.0,
+    };
+    let mut best = 0.0_f64;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.starts_with("thermal_zone") { continue; }
+        let typ = match fs::read_to_string(entry.path().join("type")) {
+            Ok(t) => t.trim().to_lowercase(),
+            Err(_) => continue,
+        };
+        if !typ.contains("cpu") && !typ.contains("x86_pkg") && !typ.contains("coretemp")
+            && !typ.contains("soc_max") && !typ.contains("cpu_big") && !typ.contains("cpu_little")
+        {
+            continue;
+        }
+        let content = match fs::read_to_string(entry.path().join("temp")) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let raw: f64 = match content.trim().parse() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let temp = if raw > 1000.0 { raw / 1000.0 } else { raw };
+        if temp > best { best = temp; }
+    }
+    best
+}
+
+fn read_live_mem_pct() -> f64 {
+    let content = match fs::read_to_string("/proc/meminfo") {
+        Ok(c) => c,
+        Err(_) => return 0.0,
+    };
+    let mut total = 0.0_f64;
+    let mut available = 0.0_f64;
+    for line in content.lines() {
+        if let Some(t) = line.strip_prefix("MemTotal:") {
+            total = t.trim().split_whitespace().next().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+        }
+        if let Some(t) = line.strip_prefix("MemAvailable:") {
+            available = t.trim().split_whitespace().next().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+        }
+    }
+    if total == 0.0 { return 0.0; }
+    1.0 - (available / total)
+}
+
+fn read_live_gpu_pct() -> f64 {
+    let drm = Path::new("/sys/class/drm");
+    let entries = match fs::read_dir(drm) {
+        Ok(e) => e,
+        Err(_) => return 0.0,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path().join("device").join("gpu_busy_percent");
+        if let Ok(content) = fs::read_to_string(&path) {
+            if let Ok(v) = content.trim().parse::<f64>() {
+                return (v / 100.0).min(1.0);
+            }
+        }
+    }
+    0.0
+}
+
+fn read_live_battery() -> (f64, String, String) {
+    let psu = Path::new("/sys/class/power_supply");
+    let entries = match fs::read_dir(psu) {
+        Ok(e) => e,
+        Err(_) => return (0.0, String::new(), String::new()),
+    };
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.starts_with("BAT") && name != "battery" && !name.starts_with("axp") {
+            continue;
+        }
+        if !dir.join("capacity").exists() { continue; }
+        let capacity = fs::read_to_string(dir.join("capacity")).ok()
+            .and_then(|s| s.trim().parse::<f64>().ok()).unwrap_or(0.0);
+        let status = fs::read_to_string(dir.join("status")).ok()
+            .map(|s| s.trim().to_string()).unwrap_or_default();
+        let temp_raw = fs::read_to_string(dir.join("temp")).ok()
+            .and_then(|s| s.trim().parse::<f64>().ok()).unwrap_or(0.0);
+        let temp_str = if temp_raw > 0.0 {
+            format!("{:.0}°C", temp_raw / 10.0)
+        } else {
+            String::new()
+        };
+        return (capacity / 100.0, status, temp_str);
+    }
+    // fallback: thermal zone named "battery"
+    for entry in fs::read_dir("/sys/class/thermal").unwrap_or_else(|_| fs::read_dir("/dev/null").unwrap()).flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.contains("battery") || name.contains("temp") {
+            if let Ok(content) = fs::read_to_string(entry.path().join("temp")) {
+                if let Ok(raw) = content.trim().parse::<f64>() {
+                    let temp_str = format!("{:.0}°C", raw / 1000.0);
+                    return (0.0, String::new(), temp_str);
+                }
+            }
+        }
+    }
+    (0.0, String::new(), String::new())
+}
+
 impl Component for MonitorComponent {
     fn name(&self) -> &str { "monitor" }
 
@@ -52,45 +213,64 @@ impl Component for MonitorComponent {
     }
 
     fn render_styled(&self, ctx: &RenderCtx) -> Vec<Vec<StyledSpan>> {
-        let info = ctx.info;
         let bar_w = (ctx.term_width.saturating_sub(12)).min(20).max(6);
         let ac = ctx.palette.first().copied().unwrap_or(Color::new(255, 102, 146));
 
         let mut lines: Vec<Vec<StyledSpan>> = Vec::new();
-
         lines.push(vec![StyledSpan::new(" MONITOR ").fg(ac).bold()]);
 
-        // CPU
-        let cpu_pct = parse_pct(info.get("load").unwrap_or(""));
+        // CPU — live from /proc/stat
+        let cpu_pct = read_live_cpu_pct(&self.cpu_snapshot);
         lines.push(render_bar("CPU", cpu_pct, bar_w, Color::new(100, 200, 255)));
 
-        // RAM
-        let mem_pct = parse_mem_pct(info.get("memory").unwrap_or(""));
+        // RAM — live from /proc/meminfo
+        let mem_pct = read_live_mem_pct();
         lines.push(render_bar("RAM", mem_pct, bar_w, Color::new(157, 133, 255)));
 
-        // GPU
-        let gpu_pct = if !info.gpu.is_empty() && info.gpu != "unknown" {
-            parse_pct(info.get("load").unwrap_or("")) * 0.6
-        } else { 0.0 };
-        lines.push(render_bar("GPU", gpu_pct.min(1.0), bar_w, Color::new(255, 184, 131)));
-
-        // Temperature
-        if !info.cpu_temp.is_empty() {
-            let temp_pct = info.cpu_temp.trim_end_matches('°').trim_end_matches('C').parse::<f64>().unwrap_or(0.0) / 100.0;
-            lines.push(render_bar("TEMP", temp_pct.min(1.0), bar_w, Color::new(255, 100, 100)));
+        // GPU — live from sysfs gpu_busy_percent
+        let gpu_pct = read_live_gpu_pct();
+        if gpu_pct > 0.0 {
+            lines.push(render_bar("GPU", gpu_pct, bar_w, Color::new(255, 184, 131)));
+        } else {
+            // fallback: estimate from loadavg
+            let load = read_stat().map(|(t, _)| t as f64).unwrap_or(0.0);
+            let est = if load > 0.0 { (load * 0.0001).min(1.0) } else { 0.0 };
+            lines.push(render_bar("GPU", est, bar_w, Color::new(255, 184, 131)));
         }
 
-        // Disk
-        if !info.disk.is_empty() {
-            let disk_pct = parse_disk_pct(&info.disk);
+        // Temperature — live from thermal zones
+        let cpu_temp = read_live_cpu_temp();
+        if cpu_temp > 0.0 {
+            let temp_pct = (cpu_temp / 100.0).min(1.0);
+            lines.push(render_bar("TEMP", temp_pct, bar_w, Color::new(255, 100, 100)));
+        }
+
+        // Disk — from ctx.info (one-shot, but stable enough)
+        if !ctx.info.disk.is_empty() {
+            let disk_pct = parse_disk_pct(&ctx.info.disk);
             lines.push(render_bar("DSK", disk_pct, bar_w, Color::new(255, 200, 80)));
         }
 
-        // Battery
-        if !info.battery_level.is_empty() {
-            let bat_pct = info.battery_level.trim_end_matches('%').parse::<f64>().unwrap_or(0.0) / 100.0;
-            let temp = if !info.battery_temp.is_empty() { format!(" {}", info.battery_temp) } else { String::new() };
-            let status = if !info.battery_status.is_empty() { format!(" {}", info.battery_status) } else { String::new() };
+        // Battery — live from power supply sysfs
+        let (bat_pct, bat_status, bat_temp) = read_live_battery();
+        if bat_pct > 0.0 {
+            lines.push(render_bar("BAT", bat_pct, bar_w, Color::new(80, 200, 120)));
+            let detail = if bat_temp.is_empty() && bat_status.is_empty() {
+                String::new()
+            } else {
+                let mut parts = Vec::new();
+                if !bat_temp.is_empty() { parts.push(bat_temp); }
+                if !bat_status.is_empty() { parts.push(bat_status); }
+                parts.join(" ")
+            };
+            if !detail.is_empty() {
+                lines.push(render_line("", &detail, Color::new(140, 140, 160)));
+            }
+        } else if !ctx.info.battery_level.is_empty() {
+            // fallback to one-shot info
+            let bat_pct = ctx.info.battery_level.trim_end_matches('%').parse::<f64>().unwrap_or(0.0) / 100.0;
+            let temp = if !ctx.info.battery_temp.is_empty() { format!(" {}", ctx.info.battery_temp) } else { String::new() };
+            let status = if !ctx.info.battery_status.is_empty() { format!(" {}", ctx.info.battery_status) } else { String::new() };
             lines.push(render_bar("BAT", bat_pct, bar_w, Color::new(80, 200, 120)));
             lines.push(render_line("", &format!("{}{}", temp, status), Color::new(140, 140, 160)));
         }
@@ -100,25 +280,6 @@ impl Component for MonitorComponent {
 
     fn min_width(&self) -> usize { 25 }
     fn min_height(&self) -> usize { 6 }
-}
-
-fn parse_pct(s: &str) -> f64 {
-    if s.is_empty() { return 0.0; }
-    // Try to parse as a percentage number
-    if let Ok(v) = s.trim_end_matches('%').parse::<f64>() {
-        return (v / 100.0).min(1.0);
-    }
-    // Try "used/total" format (like load)
-    if let Some((used, total)) = s.split_once('/') {
-        let u = used.trim().parse::<f64>().unwrap_or(0.0);
-        let t = total.trim().parse::<f64>().unwrap_or(1.0);
-        if t > 0.0 { return (u / t).min(1.0); }
-    }
-    0.0
-}
-
-fn parse_mem_pct(s: &str) -> f64 {
-    parse_pct(s)
 }
 
 fn parse_disk_pct(s: &str) -> f64 {
