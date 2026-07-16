@@ -138,6 +138,14 @@ pub struct DisplayConfig {
     pub right: Vec<FieldDef>,
 }
 
+impl DisplayConfig {
+    fn dedup(&mut self) {
+        let mut seen = std::collections::HashSet::new();
+        self.left.retain(|f| seen.insert(f.field.clone()));
+        self.right.retain(|f| seen.insert(f.field.clone()));
+    }
+}
+
 impl Default for DisplayConfig {
     fn default() -> Self {
         DisplayConfig {
@@ -320,12 +328,14 @@ impl Config {
         }
         let raw = fs::read_to_string(&path)?;
         // Try current format first
-        if let Ok(cfg) = serde_json::from_str::<Config>(&raw) {
+        if let Ok(mut cfg) = serde_json::from_str::<Config>(&raw) {
+            cfg.display.dedup();
             return Ok(cfg);
         }
         // Try migrating from old Python format
-        if let Ok(old) = serde_json::from_str::<OldConfig>(&raw) {
-            let cfg = Self::migrate(old);
+        if let Ok(mut old) = serde_json::from_str::<OldConfig>(&raw) {
+            let mut cfg = Self::migrate(old);
+            cfg.display.dedup();
             cfg.save()?;
             return Ok(cfg);
         }
