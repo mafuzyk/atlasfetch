@@ -92,17 +92,17 @@ pub fn all_themes() -> Vec<Theme> {
     vec![
         // LGBTQ+ flags
         theme!("xenogender", ["#FF6692", "#FF9A98", "#FFB883", "#FBFFA8", "#85BCFF", "#9D85FF", "#A510FF"]),
-        theme!("trans", ["#55CDFC", "#F7A8B8", "#FFFFFF", "#F7A8B8", "#55CDFC"]),
+        theme!("trans", ["#55CDFC", "#55CDFC", "#F7A8B8", "#FFFFFF", "#F7A8B8", "#55CDFC", "#55CDFC"]),
         theme!("nb", ["#FFF430", "#FFFFFF", "#9C59D1", "#2C2C2C"]),
         theme!("genderfluid", ["#FF75A2", "#FFFFFF", "#C011D7", "#2C2C2C", "#3170D0"]),
         theme!("pan", ["#FF218C", "#FFD800", "#21B1FF"]),
-        theme!("bi", ["#D60270", "#9B4F96", "#0038A8"]),
+        theme!("bi", ["#D60270", "#D60270", "#9B4F96", "#0038A8", "#0038A8"]),
         theme!("ace", ["#000000", "#A4A4A4", "#FFFFFF", "#810081"]),
-        theme!("lesbian", ["#D52D00", "#FF9A56", "#FFFFFF", "#D362A4", "#A30262"]),
+        theme!("lesbian", ["#D52D00", "#D52D00", "#FF9A56", "#FFFFFF", "#D362A4", "#A30262", "#A30262"]),
         theme!("gay", ["#078D70", "#26CEAA", "#98E8C1", "#FFFFFF", "#7BADE2", "#5049CC", "#3D1A78"]),
         theme!("intersex", ["#FFD700", "#7902AA"]),
         theme!("aromantic", ["#3DA542", "#A8D47A", "#FFFFFF", "#BABABA", "#000000"]),
-        theme!("agender", ["#000000", "#BABABA", "#FFFFFF", "#BABABA", "#000000"]),
+        theme!("agender", ["#000000", "#BABABA", "#FFFFFF", "#B4FF3B", "#FFFFFF", "#BABABA", "#000000"]),
 
         // Themes
         theme!("arch", ["#1793D1", "#1793D1", "#1793D1", "#1793D1", "#1793D1"]),
@@ -124,12 +124,21 @@ pub fn all_themes() -> Vec<Theme> {
     ]
 }
 
-/// Stretch index: maps position `i` (0..total) onto palette len so that the
-/// full flag pattern is always visible — colours are never clipped or wrapped.
+/// Stretch index: distributes `total` positions across `len` palette entries
+/// as evenly as possible — each entry gets at least `total/len` rows, and the
+/// first `total % len` entries get one extra.  No colour is ever skipped when
+/// `total >= len`, and the mapping stays contiguous.
 pub fn stretch_index(i: usize, total: usize, len: usize) -> usize {
-    if len <= 1 || total <= 1 { return 0; }
-    let pos = i * (len - 1) / (total - 1);
-    pos.min(len - 1)
+    if len <= 1 || total == 0 { return 0; }
+    if total <= len { return i.min(len - 1); }
+    let base = total / len;
+    let rem = total % len;
+    let thick = base + 1;
+    if i < thick * rem {
+        i / thick
+    } else {
+        rem + (i - thick * rem) / base
+    }
 }
 
 /// Return a flag-pattern colour for a given position, if the palette matches
