@@ -514,13 +514,13 @@ fn render_tabs(frame: &mut Frame, area: Rect, editor: &Editor) {
 
 fn render_hints(frame: &mut Frame, area: Rect, editor: &Editor) {
     let text = match editor.tab {
-        Tab::Welcome => " Tab next  Enter setup  q quit",
-        Tab::Theme   => " ↑↓ theme  Enter apply  c custom palette  Tab next  q quit",
-        Tab::Mode    => " ↑↓ mode  Enter apply  Tab next  q quit",
-        Tab::Layout  => " ↑↓ layout  Enter apply  Tab next  q quit",
-        Tab::Ascii   => " ↑↓ logo  Enter select  c custom file  p paste  d disable  Tab next  q quit",
-        Tab::Panels  => " ↑↓ nav  Space toggle  [/] panel  a add  d delete  r reorder  e edit label Tab next  q quit",
-        Tab::Save    => " Enter save  q discard",
+        Tab::Welcome => " Tab/Enter next  q quit",
+        Tab::Theme   => " ↑↓ theme  c custom palette  v toggle direction  Tab/Enter next  q quit",
+        Tab::Mode    => " ↑↓ mode  Tab/Enter next  q quit",
+        Tab::Layout  => " ↑↓ layout  Tab/Enter next  q quit",
+        Tab::Ascii   => " ↑↓ logo  d disable  c custom file  p paste  Tab/Enter next  q quit",
+        Tab::Panels  => " ↑↓ nav  Space toggle  [/] panel  a add  d delete  r reorder  e edit label  Tab/Enter next  q quit",
+        Tab::Save    => " s save & exit  q discard",
     };
     frame.render_widget(Paragraph::new(Line::from(Span::styled(text, Style::default().fg(TuiColor::Rgb(140, 140, 140))))).style(Style::default().bg(TuiColor::Rgb(15, 15, 15))), area);
 }
@@ -553,7 +553,7 @@ fn render_welcome_tab(frame: &mut Frame, area: Rect, _editor: &Editor) {
             Line::from("  5. ASCII  — select or disable ASCII art logos"),
             Line::from("  6. Save   — save your configuration"),
             Line::from(""),
-            Line::from(Span::styled("  Press Enter to start, or Tab to go to the next tab.", Style::default().fg(TuiColor::Rgb(157, 133, 255)))),
+            Line::from(Span::styled("  Press Tab or Enter to start configuring!", Style::default().fg(TuiColor::Rgb(157, 133, 255)))),
         ]))
         .block(Block::default().title("Welcome").borders(Borders::ALL).border_type(BorderType::Rounded).border_style(Style::default().fg(TuiColor::Rgb(133, 188, 255)))),
         area);
@@ -712,7 +712,7 @@ fn render_save_tab(frame: &mut Frame, area: Rect, editor: &Editor) {
             Line::from(format!("  Fields:    {} enabled", n_enabled)),
             Line::from(format!("  Config:    ~/.config/atlasfetch/config.json")),
             Line::from(""),
-            Line::from(Span::styled("  Enter — Save & Exit", Style::default().fg(TuiColor::Rgb(133, 188, 255)))),
+            Line::from(Span::styled("  s — Save & Exit", Style::default().fg(TuiColor::Rgb(133, 188, 255)))),
             Line::from(Span::styled("  q     — Discard & Exit", Style::default().fg(TuiColor::Rgb(255, 102, 146)))),
         ]))
         .block(Block::default().title("Save").borders(Borders::ALL).border_type(BorderType::Rounded).border_style(Style::default().fg(TuiColor::Rgb(133, 188, 255)))),
@@ -875,7 +875,7 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
                 if editor.tab == Tab::Save { return Ok(false); }
                 return Ok(false);
             }
-            KeyCode::Tab => { editor.tab = editor.tab.next(); }
+            KeyCode::Enter | KeyCode::Tab => { editor.tab = editor.tab.next(); }
             KeyCode::BackTab => { editor.tab = editor.tab.prev(); }
             KeyCode::Up => {
                 match editor.tab {
@@ -899,7 +899,24 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
                         }
                     }
                     Tab::Ascii => {
-                        editor.ascii_selected = editor.ascii_selected.saturating_sub(1);
+                        let n = editor.logo_keys.len();
+                        editor.ascii_selected = editor.ascii_selected.saturating_sub(1).min(n + 2);
+                        let sel = editor.ascii_selected;
+                        if sel < n {
+                            let key = &editor.logo_keys[sel];
+                            editor.ascii_source = format!("builtin:{}", key);
+                            editor.cfg.logo.key = key.clone();
+                            if let Ok(art) = ascii::load(&editor.cfg) {
+                                editor.ascii_art = art;
+                            }
+                            editor.dirty = true;
+                        } else if sel == n + 2 && n > 0 {
+                            let key = &editor.logo_keys[0];
+                            editor.ascii_source = format!("builtin:{}", key);
+                            editor.ascii_art = ascii::load(&editor.cfg).unwrap_or_default();
+                            editor.cfg.logo.key = key.clone();
+                            editor.dirty = true;
+                        }
                     }
                     Tab::Panels => {
                         if editor.panel_focus {
@@ -936,8 +953,24 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
                         }
                     }
                     Tab::Ascii => {
-                        let max = editor.logo_keys.len() + 2; // builtins + file + paste + disable
-                        editor.ascii_selected = (editor.ascii_selected + 1).min(max);
+                        let n = editor.logo_keys.len();
+                        editor.ascii_selected = (editor.ascii_selected + 1).min(n + 2);
+                        let sel = editor.ascii_selected;
+                        if sel < n {
+                            let key = &editor.logo_keys[sel];
+                            editor.ascii_source = format!("builtin:{}", key);
+                            editor.cfg.logo.key = key.clone();
+                            if let Ok(art) = ascii::load(&editor.cfg) {
+                                editor.ascii_art = art;
+                            }
+                            editor.dirty = true;
+                        } else if sel == n + 2 {
+                            editor.ascii_source = "disabled".into();
+                            editor.cfg.logo.key = String::new();
+                            editor.cfg.logo.path = "disabled".into();
+                            editor.ascii_art = String::new();
+                            editor.dirty = true;
+                        }
                     }
                     Tab::Panels => {
                         let max = if editor.panel_focus {
@@ -952,68 +985,6 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
                         }
                     }
                     _ => {}
-                }
-            }
-            KeyCode::Enter => {
-                match editor.tab {
-                    Tab::Welcome => {
-                        editor.tab = Tab::Theme;
-                    }
-                    Tab::Mode => {
-                        let modes = DisplayMode::all();
-                        if editor.mode_selected < modes.len() {
-                            editor.display_mode = modes[editor.mode_selected];
-                            editor.dirty = true;
-                        }
-                    }
-                    Tab::Layout => {
-                        editor.apply_layout(editor.layout_selected);
-                    }
-                    Tab::Theme => {
-                        // Apply selected theme
-                        if editor.theme_selected < editor.themes.len() {
-                            editor.cfg.logo.colors = editor.themes[editor.theme_selected].colors.clone();
-                            editor.dirty = true;
-                        }
-                    }
-                    Tab::Ascii => {
-                        let n = editor.logo_keys.len();
-                        if editor.ascii_selected < n {
-                            let key = &editor.logo_keys[editor.ascii_selected];
-                            editor.ascii_source = format!("builtin:{}", key);
-                            editor.cfg.logo.key = key.clone();
-                            if let Ok(art) = ascii::load(&editor.cfg) {
-                                editor.ascii_art = art;
-                            }
-                            editor.dirty = true;
-                        } else if editor.ascii_selected == n {
-                            editor.input_mode = InputMode::BrowsingFile;
-                            editor.file_browser_sel = 0;
-                            editor.refresh_file_browser();
-                        } else if editor.ascii_selected == n + 1 {
-                            editor.input_mode = InputMode::PastingAscii;
-                        } else if editor.ascii_selected == n + 2 {
-                            editor.ascii_source = "disabled".into();
-                            editor.cfg.logo.key = String::new();
-                            editor.cfg.logo.path = "disabled".into();
-                            editor.ascii_art = String::new();
-                            editor.ascii_selected = n + 2;
-                            editor.dirty = true;
-                        }
-                    }
-                    Tab::Panels => {
-                        // Toggle enabled on focused panel's selected field
-                        let fields = if editor.panel_focus { &mut editor.cfg.display.right } else { &mut editor.cfg.display.left };
-                        let idx = if editor.panel_focus { editor.panel_right_sel } else { editor.panel_left_sel };
-                        if idx < fields.len() {
-                            fields[idx].enabled = !fields[idx].enabled;
-                            editor.dirty = true;
-                        }
-                    }
-                    Tab::Save => {
-                        editor.saved = true;
-                        return Ok(false); // save and exit
-                    }
                 }
             }
             KeyCode::Char(' ') => {
@@ -1045,6 +1016,21 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
                         fields.remove(idx);
                         editor.dirty = true;
                     }
+                }
+                if editor.tab == Tab::Ascii {
+                    editor.ascii_source = "disabled".into();
+                    editor.cfg.logo.key = String::new();
+                    editor.cfg.logo.path = "disabled".into();
+                    editor.ascii_art = String::new();
+                    let n = editor.logo_keys.len();
+                    editor.ascii_selected = n + 2;
+                    editor.dirty = true;
+                }
+            }
+            KeyCode::Char('s') => {
+                if editor.tab == Tab::Save {
+                    editor.saved = true;
+                    return Ok(false);
                 }
             }
             KeyCode::Char('r') => {
