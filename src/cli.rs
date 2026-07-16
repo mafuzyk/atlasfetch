@@ -25,4 +25,8 @@ pub struct Args {
     /// Mobile rendering mode: card, bios, companion, ascii
     #[arg(long = "mode")]
     pub mode: Option<String>,
+
+    /// Delete config and run setup wizard from scratch
+    #[arg(long = "reset")]
+    pub reset: bool,
 }

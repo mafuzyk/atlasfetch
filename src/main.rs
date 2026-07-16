@@ -172,6 +172,18 @@ fn main() -> Result<()> {
         return update_atlasfetch();
     }
 
+    // --reset: delete config and launch setup wizard
+    if args.reset {
+        let path = config::config_path()?;
+        if path.exists() {
+            std::fs::remove_file(&path)?;
+            println!("Config removed.");
+        }
+        let mut cfg = config::Config::load()?;
+        tui::run(&mut cfg)?;
+        return Ok(());
+    }
+
     // --mode: mobile rendering mode
     if let Some(ref mode_str) = args.mode {
         if let Some(mode) = mobile::MobileMode::from_str(mode_str) {
