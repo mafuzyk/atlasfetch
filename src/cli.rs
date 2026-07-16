@@ -37,4 +37,8 @@ pub struct Args {
     /// Scene/layout: classic, dashboard, cockpit, split
     #[arg(long = "scene")]
     pub scene: Option<String>,
+
+    /// Path to config file (default: ~/.config/atlasfetch/config.json)
+    #[arg(short = 'c', long = "config")]
+    pub config: Option<std::path::PathBuf>,
 }

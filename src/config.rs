@@ -12,6 +12,9 @@ use directories::BaseDirs;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::OnceLock;
+
+static CONFIG_OVERRIDE: OnceLock<PathBuf> = OnceLock::new();
 
 use crate::theme::Color;
 
@@ -297,12 +300,26 @@ fn default_right_fields() -> Vec<FieldDef> {
 
 // ── Paths ────────────────────────────────────────────────────────────────
 
+pub fn set_config_path(path: PathBuf) {
+    CONFIG_OVERRIDE.set(path).ok();
+}
+
 pub fn config_dir() -> Result<PathBuf> {
+    if let Some(p) = CONFIG_OVERRIDE.get() {
+        if p.is_file() {
+            return p.parent().map(|d| d.to_path_buf())
+                .ok_or_else(|| color_eyre::eyre::eyre!("Invalid config path: {}", p.display()));
+        }
+        return Ok(p.clone());
+    }
     let base = BaseDirs::new().ok_or_else(|| color_eyre::eyre::eyre!("Cannot determine home directory"))?;
     Ok(base.home_dir().join(".config").join("atlasfetch"))
 }
 
 pub fn config_path() -> Result<PathBuf> {
+    if let Some(p) = CONFIG_OVERRIDE.get() {
+        return Ok(p.clone());
+    }
     Ok(config_dir()?.join("config.json"))
 }
 

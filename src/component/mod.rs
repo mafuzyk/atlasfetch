@@ -3,6 +3,8 @@ pub mod companion;
 pub mod monitor;
 pub mod system;
 
+use unicode_width::UnicodeWidthStr;
+
 use crate::config::Config;
 use crate::info::SysInfo;
 use crate::theme::Color;
@@ -122,13 +124,13 @@ fn wrap_block(title: &str, lines: &[Vec<StyledSpan>], term_w: usize) -> Vec<Vec<
     if !title.is_empty() {
         let sep = "\u{2500}";
         let t = format!(" {} ", title);
-        let side = (term_w.saturating_sub(t.len())) / 2;
+        let side = (term_w.saturating_sub(t.width())) / 2;
         let header = format!("{}{}{}", sep.repeat(side), t, sep.repeat(side));
         out.push(vec![StyledSpan::new(header)]);
     }
     for line in lines {
         let mut padded = line.to_vec();
-        let w: usize = line.iter().map(|s| s.text.len()).sum();
+        let w: usize = line.iter().map(|s| s.text.width()).sum();
         if w < term_w {
             padded.push(StyledSpan::new(" ".repeat(term_w - w)));
         }
@@ -147,7 +149,7 @@ fn render_classic(components: &[&dyn Component], ctx: &RenderCtx) -> SceneOutput
     let sys_lines = system.map(|c| c.render_styled(ctx)).unwrap_or_default();
     let mon_lines = monitor.map(|c| c.render_styled(ctx)).unwrap_or_default();
 
-    let aw = ascii_lines.iter().map(|l| l.iter().map(|s| s.text.len()).sum::<usize>()).max().unwrap_or(0);
+    let aw = ascii_lines.iter().map(|l| l.iter().map(|s| s.text.width()).sum::<usize>()).max().unwrap_or(0);
     let gap = 2;
     let right_w = ctx.term_width.saturating_sub(aw + gap + 4);
 
@@ -159,7 +161,7 @@ fn render_classic(components: &[&dyn Component], ctx: &RenderCtx) -> SceneOutput
         if i < ascii_lines.len() {
             line.extend(ascii_lines[i].clone());
         }
-        let cur_w: usize = line.iter().map(|s| s.text.len()).sum();
+        let cur_w: usize = line.iter().map(|s| s.text.width()).sum();
         if cur_w < aw + gap + 2 {
             line.push(StyledSpan::new(" ".repeat(aw + gap + 2 - cur_w)));
         }
@@ -167,13 +169,13 @@ fn render_classic(components: &[&dyn Component], ctx: &RenderCtx) -> SceneOutput
             line.extend(sys_lines[i].clone());
         }
         if i < mon_lines.len() {
-            let cur_w: usize = line.iter().map(|s| s.text.len()).sum();
+            let cur_w: usize = line.iter().map(|s| s.text.width()).sum();
             if right_w > 0 && cur_w + 2 < ctx.term_width {
                 line.push(StyledSpan::new(" ".repeat(2)));
                 line.extend(mon_lines[i].clone());
             }
         }
-        let w: usize = line.iter().map(|s| s.text.len()).sum();
+        let w: usize = line.iter().map(|s| s.text.width()).sum();
         if w < ctx.term_width {
             line.push(StyledSpan::new(" ".repeat(ctx.term_width - w)));
         }
@@ -211,16 +213,16 @@ fn render_dashboard(components: &[&dyn Component], ctx: &RenderCtx) -> SceneOutp
         let mut line = Vec::new();
         if i < ascii_lines.len() {
             line.extend(ascii_lines[i].clone());
-            let w: usize = line.iter().map(|s| s.text.len()).sum();
+            let w: usize = line.iter().map(|s| s.text.width()).sum();
             if w < half { line.push(StyledSpan::new(" ".repeat(half - w))); }
         } else if i < sys_lines.len() {
-            let w: usize = line.iter().map(|s| s.text.len()).sum();
+            let w: usize = line.iter().map(|s| s.text.width()).sum();
             if w < half { line.push(StyledSpan::new(" ".repeat(half - w))); }
         }
         if i < sys_lines.len() {
             line.extend(sys_lines[i].clone());
         }
-        let w: usize = line.iter().map(|s| s.text.len()).sum();
+        let w: usize = line.iter().map(|s| s.text.width()).sum();
         if w < ctx.term_width { line.push(StyledSpan::new(" ".repeat(ctx.term_width - w))); }
         all.push(line);
     }
@@ -231,16 +233,16 @@ fn render_dashboard(components: &[&dyn Component], ctx: &RenderCtx) -> SceneOutp
         let mut line = Vec::new();
         if i < mon_lines.len() {
             line.extend(mon_lines[i].clone());
-            let w: usize = line.iter().map(|s| s.text.len()).sum();
+            let w: usize = line.iter().map(|s| s.text.width()).sum();
             if w < half { line.push(StyledSpan::new(" ".repeat(half - w))); }
         } else {
-            let w: usize = line.iter().map(|s| s.text.len()).sum();
+            let w: usize = line.iter().map(|s| s.text.width()).sum();
             if w < half { line.push(StyledSpan::new(" ".repeat(half - w))); }
         }
         if i < comp_lines.len() {
             line.extend(comp_lines[i].clone());
         }
-        let w: usize = line.iter().map(|s| s.text.len()).sum();
+        let w: usize = line.iter().map(|s| s.text.width()).sum();
         if w < ctx.term_width { line.push(StyledSpan::new(" ".repeat(ctx.term_width - w))); }
         all.push(line);
     }
@@ -262,11 +264,11 @@ fn render_cockpit(components: &[&dyn Component], ctx: &RenderCtx) -> SceneOutput
 
     for line in &ascii_lines {
         let mut l = Vec::new();
-        let w: usize = line.iter().map(|s| s.text.len()).sum();
+        let w: usize = line.iter().map(|s| s.text.width()).sum();
         let pad = ctx.term_width.saturating_sub(w) / 2;
         if pad > 0 { l.push(StyledSpan::new(" ".repeat(pad))); }
         l.extend(line.clone());
-        let w2: usize = l.iter().map(|s| s.text.len()).sum();
+        let w2: usize = l.iter().map(|s| s.text.width()).sum();
         if w2 < ctx.term_width { l.push(StyledSpan::new(" ".repeat(ctx.term_width - w2))); }
         all.push(l);
     }
@@ -279,12 +281,12 @@ fn render_cockpit(components: &[&dyn Component], ctx: &RenderCtx) -> SceneOutput
         if i < sys_lines.len() {
             line.extend(sys_lines[i].clone());
         }
-        let w: usize = line.iter().map(|s| s.text.len()).sum();
+        let w: usize = line.iter().map(|s| s.text.width()).sum();
         if w < half { line.push(StyledSpan::new(" ".repeat(half - w))); }
         if i < mon_lines.len() {
             line.extend(mon_lines[i].clone());
         }
-        let w2: usize = line.iter().map(|s| s.text.len()).sum();
+        let w2: usize = line.iter().map(|s| s.text.width()).sum();
         if w2 < ctx.term_width { line.push(StyledSpan::new(" ".repeat(ctx.term_width - w2))); }
         all.push(line);
     }
@@ -313,14 +315,14 @@ fn render_split_monitor(components: &[&dyn Component], ctx: &RenderCtx) -> Scene
         // Left: ASCII + system
         if i < ascii_lines.len() {
             line.extend(ascii_lines[i].clone());
-            let w: usize = line.iter().map(|s| s.text.len()).sum();
+            let w: usize = line.iter().map(|s| s.text.width()).sum();
             if w < half / 2 { line.push(StyledSpan::new(" ".repeat(half / 2 - w))); }
         }
         if i < sys_lines.len() {
             line.extend(sys_lines[i].clone());
         }
 
-        let w_left: usize = line.iter().map(|s| s.text.len()).sum();
+        let w_left: usize = line.iter().map(|s| s.text.width()).sum();
         if w_left < half {
             line.push(StyledSpan::new(" ".repeat(half - w_left)));
         }
@@ -330,7 +332,7 @@ fn render_split_monitor(components: &[&dyn Component], ctx: &RenderCtx) -> Scene
             line.extend(mon_lines[i].clone());
         }
 
-        let w: usize = line.iter().map(|s| s.text.len()).sum();
+        let w: usize = line.iter().map(|s| s.text.width()).sum();
         if w < ctx.term_width { line.push(StyledSpan::new(" ".repeat(ctx.term_width - w))); }
         all.push(line);
     }

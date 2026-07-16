@@ -140,6 +140,10 @@ fn main() -> Result<()> {
 
     let args = cli::Args::parse();
 
+    if let Some(ref cfg_path) = args.config {
+        config::set_config_path(cfg_path.clone());
+    }
+
     // --list-presets: print and exit
     if args.list_presets {
         let themes = theme::all_themes();

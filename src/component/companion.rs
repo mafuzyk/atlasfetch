@@ -1,3 +1,5 @@
+use unicode_width::UnicodeWidthStr;
+
 use super::{Component, RenderCtx, StyledSpan};
 use crate::theme::Color;
 
@@ -88,7 +90,7 @@ impl Component for CompanionComponent {
 
         // Padding to fill width
         for line in &mut lines {
-            let w: usize = line.iter().map(|s| s.text.len()).sum();
+            let w: usize = line.iter().map(|s| s.text.width()).sum();
             if w < tw {
                 line.push(StyledSpan::new(" ".repeat(tw - w)));
             }

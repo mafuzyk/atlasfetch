@@ -70,7 +70,7 @@ fn read_live_cpu_pct(snapshot: &Mutex<Option<CpuSnapshot>>) -> f64 {
         Some(v) => v,
         None => return 0.0,
     };
-    let mut guard = snapshot.lock().unwrap();
+    let mut guard = snapshot.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(prev) = guard.as_ref() {
         let dtotal = cur.0.saturating_sub(prev.total);
         let didle = cur.1.saturating_sub(prev.idle);

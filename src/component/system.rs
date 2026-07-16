@@ -1,3 +1,5 @@
+use unicode_width::UnicodeWidthStr;
+
 use super::{Component, RenderCtx, StyledSpan};
 use crate::widget::{FieldWidget, RenderCtx as WidgetCtx};
 
@@ -41,7 +43,7 @@ impl Component for SystemComponent {
                 }
             }
 
-            let cur: usize = line.iter().map(|s| s.text.len()).sum();
+            let cur: usize = line.iter().map(|s| s.text.width()).sum();
             if cur < half {
                 line.push(StyledSpan::new(" ".repeat(half - cur)));
             }
