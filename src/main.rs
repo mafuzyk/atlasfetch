@@ -22,6 +22,12 @@ fn detect_src_dir() -> String {
     if let Ok(dir) = std::env::var("ATLASFETCH_SRC") {
         return dir;
     }
+    // Try CWD first
+    if let Ok(cwd) = std::env::current_dir() {
+        if cwd.join("Cargo.toml").exists() && cwd.join(".git").exists() {
+            return cwd.to_string_lossy().to_string();
+        }
+    }
     // Try to find source from the binary's own path
     if let Ok(exe) = std::env::current_exe() {
         let mut path = exe.parent().unwrap_or(std::path::Path::new("/"));
@@ -36,7 +42,19 @@ fn detect_src_dir() -> String {
             }
         }
     }
+    // Try common locations
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    for candidate in &[
+        format!("{}/Projetos/atlasfetch", home),
+        format!("{}/src/atlasfetch", home),
+        format!("{}/atlasfetch", home),
+        format!("{}/code/atlasfetch", home),
+        format!("{}/dev/atlasfetch", home),
+    ] {
+        if std::path::Path::new(candidate).join("Cargo.toml").exists() && std::path::Path::new(candidate).join(".git").exists() {
+            return candidate.clone();
+        }
+    }
     format!("{}/atlasfetch", home)
 }
 

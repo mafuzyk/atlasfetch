@@ -418,8 +418,6 @@ pub fn render_mobile(cfg: &Config, info: &SysInfo, ascii_art: &str, is_narrow: b
         .chain(cfg.display.right.iter())
         .filter(|f| f.enabled)
         .collect();
-    let n = all_fields.len();
-
     // ── Title ──
     let title_color = Color::from_hex_opt(&cfg.title.color).unwrap_or(Color::new(255, 154, 152));
     let title_text = cfg.title.format.replace("{user}", &info.user).replace("{host}", &info.host);
@@ -431,86 +429,50 @@ pub fn render_mobile(cfg: &Config, info: &SysInfo, ascii_art: &str, is_narrow: b
     let sep_str: String = cfg.separator.char.repeat(sep_len);
     out.push_str(&format!("{}  {}{}{}\n", sep_color.fg_escape(), sep_str, RESET, RESET));
 
-    // ── Body ──
-    if is_narrow || logo_lines.is_empty() {
-        // Single column: all panels, no ASCII
-        for (i, fd) in all_fields.iter().enumerate() {
-            let fg_color = if !cfg.logo.colors.is_empty() {
-                cfg.logo.colors[i % cfg.logo.colors.len()]
-            } else {
-                Color::new(255, 255, 255)
-            };
-            let avail = term_width.saturating_sub(cfg.panel.left_pad + cfg.panel.right_pad + 2).max(4);
-            let (panel_text, _) = build_panel(fd, info, &cfg.panel, fg_color, avail);
-            let mut row = String::new();
-            row.push_str(&" ".repeat(cfg.panel.left_pad));
-            row.push_str(&panel_text);
-            let rv = visible_width(&row);
-            if rv < term_width {
-                row.push_str(&" ".repeat(term_width.saturating_sub(rv)));
-            }
-            row.push_str(RESET);
-            row.push('\n');
-            out.push_str(&row);
-        }
-    } else {
-        // ASCII left, panels right
-        let lh = logo_lines.len();
-        let logo_width = logo_lines.iter().map(|l| UnicodeWidthStr::width(*l)).max().unwrap_or(0);
-        let n_iter = lh.max(n);
-
-        for i in 0..n_iter {
+    // ── ASCII header block ──
+    if !logo_lines.is_empty() {
+        for (i, line) in logo_lines.iter().enumerate() {
             let logo_color = if !cfg.logo.colors.is_empty() {
                 cfg.logo.colors[i % cfg.logo.colors.len()]
             } else {
                 Color::new(255, 255, 255)
             };
-
+            let center = term_width.saturating_sub(line.trim_end().width()) / 2;
             let mut row = String::new();
-            row.push_str(&" ".repeat(cfg.panel.left_pad));
-
-            // ASCII art
-            if i < lh {
-                let trimmed = logo_lines[i].trim_end();
-                let padded = format!("{:width$}", trimmed, width = logo_width);
-                for ch in padded.chars() {
-                    if ch != ' ' {
-                        row.push_str(&format!("{}{}", logo_color.fg_escape(), ch));
-                    } else {
-                        row.push(' ');
-                    }
-                }
-            } else {
-                // No ASCII for this row — fill with spaces to keep alignment
-                row.push_str(&" ".repeat(logo_width));
-            }
-
-            // Gap
-            row.push_str(&" ".repeat(cfg.panel.gap));
-
-            // Panel
-            if i < n {
-                let fd = all_fields[i];
-                let fg_color = if !cfg.logo.colors.is_empty() {
-                    cfg.logo.colors[(i + 2) % cfg.logo.colors.len()]
+            row.push_str(&" ".repeat(center));
+            for ch in line.chars() {
+                if ch != ' ' {
+                    row.push_str(&format!("{}{}", logo_color.fg_escape(), ch));
                 } else {
-                    Color::new(255, 255, 255)
-                };
-                let avail_panel = term_width
-                    .saturating_sub(cfg.panel.left_pad + logo_width + cfg.panel.gap + cfg.panel.right_pad + 2)
-                    .max(4);
-                let (panel_text, _) = build_panel(fd, info, &cfg.panel, fg_color, avail_panel);
-                row.push_str(&panel_text);
-            }
-
-            let rv = visible_width(&row);
-            if rv < term_width {
-                row.push_str(&" ".repeat(term_width.saturating_sub(rv)));
+                    row.push(' ');
+                }
             }
             row.push_str(RESET);
             row.push('\n');
             out.push_str(&row);
         }
+        out.push('\n');
+    }
+
+    // ── Info panels (single column, full width) ──
+    for (i, fd) in all_fields.iter().enumerate() {
+        let fg_color = if !cfg.logo.colors.is_empty() {
+            cfg.logo.colors[i % cfg.logo.colors.len()]
+        } else {
+            Color::new(255, 255, 255)
+        };
+        let avail = term_width.saturating_sub(cfg.panel.left_pad + cfg.panel.right_pad + 2).max(4);
+        let (panel_text, _) = build_panel(fd, info, &cfg.panel, fg_color, avail);
+        let mut row = String::new();
+        row.push_str(&" ".repeat(cfg.panel.left_pad));
+        row.push_str(&panel_text);
+        let rv = visible_width(&row);
+        if rv < term_width {
+            row.push_str(&" ".repeat(term_width.saturating_sub(rv)));
+        }
+        row.push_str(RESET);
+        row.push('\n');
+        out.push_str(&row);
     }
 
     out.push('\n');
@@ -532,7 +494,6 @@ pub fn render_mobile_preview(cfg: &Config, info: &SysInfo, ascii_art: &str, term
         .chain(cfg.display.right.iter())
         .filter(|f| f.enabled)
         .collect();
-    let n = all_fields.len();
 
     // ── Title ──
     let title_color = Color::from_hex_opt(&cfg.title.color).unwrap_or(Color::new(255, 154, 152));
@@ -555,80 +516,53 @@ pub fn render_mobile_preview(cfg: &Config, info: &SysInfo, ascii_art: &str, term
         ],
     });
 
-    // ── Body ──
-    if is_narrow || logo_lines.is_empty() {
-        // Single column
-        for (i, fd) in all_fields.iter().enumerate() {
-            let fg_color = if !cfg.logo.colors.is_empty() {
-                cfg.logo.colors[i % cfg.logo.colors.len()]
-            } else {
-                Color::new(255, 255, 255)
-            };
-            let avail = tw.saturating_sub(cfg.panel.left_pad + cfg.panel.right_pad + 2).max(4);
-            let (parts, _) = build_panel_styled(fd, info, &cfg.panel, fg_color, avail);
-            let mut segs = vec![
-                StyledSegment { text: " ".repeat(cfg.panel.left_pad), fg: None, bg: None, bold: false },
-            ];
-            segs.extend(parts);
-            let cur_vis = visible_of_segs(&segs);
-            if cur_vis < tw {
-                segs.push(StyledSegment { text: " ".repeat(tw.saturating_sub(cur_vis)), fg: None, bg: None, bold: false });
-            }
-            lines.push(StyledLine { segments: segs });
-        }
-    } else {
-        // ASCII left + panels right
-        let lh = logo_lines.len();
-        let logo_width = logo_lines.iter().map(|l| UnicodeWidthStr::width(*l)).max().unwrap_or(0);
-        let n_iter = lh.max(n);
-
-        for i in 0..n_iter {
+    // ── ASCII header block ──
+    if !logo_lines.is_empty() {
+        for (i, line) in logo_lines.iter().enumerate() {
             let logo_color = if !cfg.logo.colors.is_empty() {
                 cfg.logo.colors[i % cfg.logo.colors.len()]
             } else {
                 Color::new(255, 255, 255)
             };
-
-            let mut segs: Vec<StyledSegment> = Vec::new();
-            segs.push(StyledSegment { text: " ".repeat(cfg.panel.left_pad), fg: None, bg: None, bold: false });
-
-            // ASCII
-            if i < lh {
-                let trimmed = logo_lines[i].trim_end();
-                let padded = format!("{:width$}", trimmed, width = logo_width);
-                for ch in padded.chars() {
-                    if ch != ' ' {
-                        segs.push(StyledSegment { text: ch.to_string(), fg: Some(logo_color), bg: None, bold: false });
-                    } else {
-                        segs.push(StyledSegment { text: " ".into(), fg: None, bg: None, bold: false });
-                    }
-                }
-            } else {
-                segs.push(StyledSegment { text: " ".repeat(logo_width), fg: None, bg: None, bold: false });
-            }
-
-            // Gap
-            segs.push(StyledSegment { text: " ".repeat(cfg.panel.gap), fg: None, bg: None, bold: false });
-
-            // Panel
-            if i < n {
-                let fd = all_fields[i];
-                let fg_color = if !cfg.logo.colors.is_empty() {
-                    cfg.logo.colors[(i + 2) % cfg.logo.colors.len()]
+            let center = tw.saturating_sub(line.trim_end().width()) / 2;
+            let mut segs = vec![
+                StyledSegment { text: " ".repeat(center), fg: None, bg: None, bold: false },
+            ];
+            for ch in line.chars() {
+                if ch != ' ' {
+                    segs.push(StyledSegment { text: ch.to_string(), fg: Some(logo_color), bg: None, bold: false });
                 } else {
-                    Color::new(255, 255, 255)
-                };
-                let avail_panel = tw.saturating_sub(cfg.panel.left_pad + logo_width + cfg.panel.gap + cfg.panel.right_pad + 2).max(4);
-                let (parts, _) = build_panel_styled(fd, info, &cfg.panel, fg_color, avail_panel);
-                segs.extend(parts);
+                    segs.push(StyledSegment { text: " ".into(), fg: None, bg: None, bold: false });
+                }
             }
-
             let cur_vis = visible_of_segs(&segs);
             if cur_vis < tw {
                 segs.push(StyledSegment { text: " ".repeat(tw.saturating_sub(cur_vis)), fg: None, bg: None, bold: false });
             }
             lines.push(StyledLine { segments: segs });
         }
+        // blank line after ASCII
+        lines.push(StyledLine { segments: vec![StyledSegment { text: " ".into(), fg: None, bg: None, bold: false }] });
+    }
+
+    // ── Info panels (single column, full width) ──
+    for (i, fd) in all_fields.iter().enumerate() {
+        let fg_color = if !cfg.logo.colors.is_empty() {
+            cfg.logo.colors[i % cfg.logo.colors.len()]
+        } else {
+            Color::new(255, 255, 255)
+        };
+        let avail = tw.saturating_sub(cfg.panel.left_pad + cfg.panel.right_pad + 2).max(4);
+        let (parts, _) = build_panel_styled(fd, info, &cfg.panel, fg_color, avail);
+        let mut segs = vec![
+            StyledSegment { text: " ".repeat(cfg.panel.left_pad), fg: None, bg: None, bold: false },
+        ];
+        segs.extend(parts);
+        let cur_vis = visible_of_segs(&segs);
+        if cur_vis < tw {
+            segs.push(StyledSegment { text: " ".repeat(tw.saturating_sub(cur_vis)), fg: None, bg: None, bold: false });
+        }
+        lines.push(StyledLine { segments: segs });
     }
 
     lines

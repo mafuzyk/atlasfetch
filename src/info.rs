@@ -108,14 +108,22 @@ pub fn collect() -> Result<SysInfo> {
 
 fn detect_os() -> String {
     if is_android() {
-        if let Ok(ver) = std::env::var("TERMUX_VERSION") {
-            return format!("Termux {}", ver);
-        }
         if let Ok(content) = fs::read_to_string("/system/build.prop") {
+            let mut release = String::new();
+            let mut sdk = String::new();
             for line in content.lines() {
                 if let Some(val) = line.strip_prefix("ro.build.version.release=") {
-                    return format!("Android {}", val.trim());
+                    release = val.trim().to_string();
                 }
+                if let Some(val) = line.strip_prefix("ro.build.version.sdk=") {
+                    sdk = val.trim().to_string();
+                }
+            }
+            if !release.is_empty() && !sdk.is_empty() {
+                return format!("Android {} (API {})", release, sdk);
+            }
+            if !release.is_empty() {
+                return format!("Android {}", release);
             }
         }
         return "Android".into();
@@ -222,14 +230,50 @@ fn read_cpu() -> String {
     let mut model = String::new();
     let mut cores = 0u32;
 
+    // On ARM/Android, "Hardware" line contains the SoC name
+    // On x86, "model name" contains the CPU model
+    // Also try "Processor" (ARM)
     for line in content.lines() {
         if let Some(val) = line.strip_prefix("model name") {
             if let Some(name) = val.split(':').nth(1) {
                 model = name.trim().to_string();
             }
         }
+        if model.is_empty() {
+            if let Some(val) = line.strip_prefix("Hardware") {
+                if let Some(name) = val.split(':').nth(1) {
+                    let trimmed = name.trim().to_string();
+                    if !trimmed.is_empty() && trimmed != "UNKNOWN" {
+                        model = trimmed;
+                    }
+                }
+            }
+        }
+        if model.is_empty() {
+            if let Some(val) = line.strip_prefix("Processor") {
+                if let Some(name) = val.split(':').nth(1) {
+                    let trimmed = name.trim().to_string();
+                    if !trimmed.is_empty() && trimmed != "UNKNOWN" {
+                        model = trimmed;
+                    }
+                }
+            }
+        }
         if line.starts_with("processor") {
             cores += 1;
+        }
+    }
+
+    // On Android, also try reading the CPU part from device tree
+    if model.is_empty() && is_android() {
+        if let Ok(compat) = fs::read_to_string("/proc/device-tree/compatible") {
+            let parts: Vec<&str> = compat.split('\0').collect();
+            if let Some(first) = parts.first() {
+                let trimmed = first.trim();
+                if !trimmed.is_empty() {
+                    model = trimmed.to_string();
+                }
+            }
         }
     }
 
@@ -383,24 +427,37 @@ fn read_gpu() -> String {
     }
 
     if is_android() {
-        // Qualcomm Adreno
+        // Qualcomm Adreno — kgsl
         let kgsl_path = Path::new("/sys/class/kgsl/kgsl-3d0");
         if kgsl_path.exists() {
             if let Ok(model) = fs::read_to_string(kgsl_path.join("gpu_model")) {
                 let trimmed = model.trim().to_string();
                 if !trimmed.is_empty() {
-                    return trimmed;
+                    return format!("Adreno {}", trimmed);
                 }
             }
-            // Fallback: read device name
             if let Ok(name) = fs::read_to_string(kgsl_path.join("device_name")) {
                 let trimmed = name.trim().to_string();
                 if !trimmed.is_empty() {
-                    return trimmed;
+                    return format!("Adreno {}", trimmed);
+                }
+            }
+            // Some devices expose the GPU clock as a hint
+            if let Ok(gpu_model) = fs::read_to_string(kgsl_path.join("gpu_clk")) {
+                let _ = gpu_model;
+            }
+        }
+        // ARM Mali — /sys/kernel/gpu
+        let mali_sys = Path::new("/sys/kernel/gpu");
+        if mali_sys.exists() {
+            if let Ok(model) = fs::read_to_string(mali_sys.join("gpu_model")) {
+                let trimmed = model.trim().to_string();
+                if !trimmed.is_empty() {
+                    return format!("Mali {}", trimmed);
                 }
             }
         }
-        // ARM Mali
+        // ARM Mali — platform devices
         let mali_path = Path::new("/sys/devices/platform");
         if let Ok(entries) = fs::read_dir(mali_path) {
             for entry in entries.flatten() {
@@ -410,17 +467,39 @@ fn read_gpu() -> String {
                     if let Ok(gpuinfo) = fs::read_to_string(entry.path().join("gpuinfo")) {
                         let trimmed = gpuinfo.trim().to_string();
                         if !trimmed.is_empty() {
-                            return trimmed;
+                            return format!("Mali {}", trimmed);
                         }
                     }
                     return "ARM Mali".into();
                 }
             }
         }
-        // PowerVR / other
+        // PowerVR
         if let Ok(content) = fs::read_to_string("/proc/gpucrypto") {
             if content.contains("GPU") || content.contains("gpu") {
                 return "PowerVR".into();
+            }
+        }
+        // Generic: try /dri symlinks
+        let drm_path = Path::new("/sys/class/drm");
+        if let Ok(entries) = fs::read_dir(drm_path) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                if name_str.starts_with("card") && !name_str.contains("-") {
+                    let dev_path = entry.path().join("device");
+                    if let Ok(vendor) = fs::read_to_string(dev_path.join("vendor")) {
+                        let v = vendor.trim().to_string();
+                        return match v.as_str() {
+                            "0x1002" | "0x1022" => "AMD GPU".into(),
+                            "0x10de" => "NVIDIA GPU".into(),
+                            "0x8086" => "Intel GPU".into(),
+                            "0x13b5" => "ARM Mali".into(),
+                            "0x5143" => "Qualcomm Adreno".into(),
+                            _ => format!("GPU ({})", v),
+                        };
+                    }
+                }
             }
         }
     }
