@@ -402,43 +402,6 @@ pub fn render_preview(cfg: &Config, info: &SysInfo, ascii_art: &str, term_width:
 
 // ── Mobile ASCII compaction ──────────────────────────────────────────────
 
-/// Downscale ASCII art using half-block Unicode characters (▀▄█).
-/// Takes 2 original lines → 1 output line. Cuts height in half.
-/// Non-space characters become blocks, spaces stay empty.
-fn downscale_half_block(ascii_art: &str) -> Vec<String> {
-    let lines: Vec<&str> = ascii_art.lines().collect();
-    let n = lines.len();
-    if n == 0 { return vec![]; }
-
-    // Pad to even number
-    let padded = (n + 1) / 2;
-    let max_w = lines.iter().map(|l| l.trim_end().chars().count()).max().unwrap_or(0);
-
-    let mut result = Vec::with_capacity(padded);
-    for i in 0..padded {
-        let top_idx = i * 2;
-        let bot_idx = i * 2 + 1;
-        let top: Vec<char> = if top_idx < n { lines[top_idx].chars().collect() } else { vec![] };
-        let bot: Vec<char> = if bot_idx < n { lines[bot_idx].chars().collect() } else { vec![] };
-
-        let mut row = String::new();
-        for j in 0..max_w {
-            let t = top.get(j).copied().unwrap_or(' ');
-            let b = bot.get(j).copied().unwrap_or(' ');
-            let t_is_space = t == ' ';
-            let b_is_space = b == ' ';
-            match (t_is_space, b_is_space) {
-                (false, false) => row.push('█'),
-                (false, true)  => row.push('▀'),
-                (true, false)  => row.push('▄'),
-                (true, true)   => row.push(' '),
-            }
-        }
-        result.push(row.trim_end().to_string());
-    }
-    result
-}
-
 /// Strip common leading whitespace from all lines.
 fn dedent(lines: &[String]) -> Vec<String> {
     let min_indent = lines.iter()
@@ -451,32 +414,11 @@ fn dedent(lines: &[String]) -> Vec<String> {
     }).collect()
 }
 
-/// Compact ASCII art for mobile: if the art is too large, downscale
-/// it using half-block characters. Returns lines ready for rendering.
+/// Compact ASCII art for mobile: dedent lines for proper centering.
 fn compact_for_mobile(ascii_art: &str) -> Vec<String> {
     let lines: Vec<&str> = ascii_art.lines().collect();
-    let n = lines.len();
-    let max_w = lines.iter().map(|l| l.trim_end().width()).max().unwrap_or(0);
-
-    // Small enough: dedent and use as-is
-    if n <= 8 && max_w <= 35 {
-        let owned: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
-        return dedent(&owned);
-    }
-
-    // Too big: downscale with half-blocks
-    let downscaled = downscale_half_block(ascii_art);
-
-    // If still too large after first pass, downscale again
-    let result = if downscaled.len() > 8 {
-        let joined = downscaled.join("\n");
-        let second = downscale_half_block(&joined);
-        second.into_iter().take(8).collect()
-    } else {
-        downscaled
-    };
-
-    dedent(&result)
+    let owned: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+    dedent(&owned)
 }
 
 // ── Mobile renderer (ASCII left + panels right, or single column) ──────────
