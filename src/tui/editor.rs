@@ -182,7 +182,7 @@ impl Editor {
         let themes = theme::all_themes();
         let theme_selected = themes.iter().position(|t| t.colors == cfg.logo.colors).unwrap_or(0);
 
-        let available = if info::is_android() {
+        let mut available: Vec<(String, String, String)> = if info::is_android() {
             vec![
                 ("device","\u{f109}","Device"),("os","\u{f17c}","OS"),("rom","\u{f0c6}","ROM"),
                 ("soc","\u{f2db}","SoC"),("arch","\u{f17c}","Arch"),("kernel","\u{e271}","Krn"),
@@ -197,7 +197,7 @@ impl Editor {
                 ("refresh_rate","\u{f26c}","Refresh"),("signal","\u{f012}","Signal"),
                 ("wifi_ssid","\u{f1eb}","WiFi"),("security_patch","\u{f021}","Patch"),
                 ("uptime_days","\u{f017}","Uptime"),("shell","\u{f489}","Sh"),
-            ]
+            ].into_iter().map(|(k,i,l)| (k.to_string(),i.to_string(),l.to_string())).collect()
         } else {
             vec![
                 ("os","\u{f17c}","OS"),("host","\u{f109}","Host"),("user","\u{f007}","Usr"),
@@ -208,8 +208,15 @@ impl Editor {
                 ("local_ip","\u{f0c1}","IP"),("resolution","\u{f108}","Res"),("de","\u{f11b}","DE"),
                 ("font","\u{f031}","Font"),("vram","\u{f26c}","VRAM"),("flatpak","\u{f2d8}","Flatpak"),
                 ("snap","\u{f1b3}","Snap"),
-            ]
+            ].into_iter().map(|(k,i,l)| (k.to_string(),i.to_string(),l.to_string())).collect()
         };
+        // Append progress-bar variants for numeric fields
+        let bar_fields = ["cpu", "gpu", "memory", "disk", "vram", "load", "cpu_temp", "battery_level", "brightness", "signal", "storage"];
+        for &base in &bar_fields {
+            if let Some((_, icon, label)) = available.iter().find(|(k, _, _)| k == base) {
+                available.push((format!("{}_bar", base), icon.clone(), format!("{} [bar]", label)));
+            }
+        }
 
         let (tw, th) = terminal::size()?;
         let layout_selected = AppLayout::pc_variants().iter().position(|l| *l == app_layout).unwrap_or(0);
@@ -228,7 +235,7 @@ impl Editor {
             logo_keys, ascii_art, ascii_source, ascii_selected,
             ascii_search: String::new(),
             panel_focus: false, panel_left_sel: 0, panel_right_sel: 0,
-            add_panel_available: available.into_iter().map(|(k, i, l)| (k.to_string(), i.to_string(), l.to_string())).collect(),
+            add_panel_available: available,
             add_panel_sel: 0,
             editing_label_input: String::new(),
             file_browser_cwd: std::env::current_dir().unwrap_or_else(|_| "/".into()),

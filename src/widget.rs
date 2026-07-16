@@ -319,10 +319,15 @@ impl Registry {
     }
 
     /// Build a registry from a list of enabled field definitions.
+    /// Keys ending in `_bar` are registered as MonitorWidget (progress bar).
     pub fn from_fields<'a>(left: impl IntoIterator<Item = &'a FieldDef>, right: impl IntoIterator<Item = &'a FieldDef>) -> Self {
         let mut reg = Self::new();
         for fd in left.into_iter().chain(right).filter(|f| f.enabled) {
-            reg.register(Box::new(FieldWidget::from_def(fd.clone())));
+            if fd.field.ends_with("_bar") {
+                reg.register(Box::new(MonitorWidget::from_def(fd.clone())));
+            } else {
+                reg.register(Box::new(FieldWidget::from_def(fd.clone())));
+            }
         }
         reg
     }
