@@ -3,6 +3,7 @@ pub mod companion;
 pub mod monitor;
 pub mod system;
 
+use std::any::Any;
 use unicode_width::UnicodeWidthStr;
 
 use crate::config::Config;
@@ -18,6 +19,7 @@ pub trait Component: Send + Sync {
     fn min_width(&self) -> usize;
     #[allow(dead_code)]
     fn min_height(&self) -> usize;
+    fn as_any(&self) -> &dyn Any;
 }
 
 pub struct RenderCtx<'a> {
@@ -66,7 +68,7 @@ impl Scene {
     }
     pub fn description(&self) -> &'static str {
         match self {
-            Scene::Classic => "Traditional fetch: ASCII left, info right",
+            Scene::Classic => "ASCII centered, left/right powerline panels",
             Scene::Dashboard => "Multi-panel TUI dashboard layout",
             Scene::Cockpit => "ASCII centered, panels arranged around it",
             Scene::SplitMonitor => "Fetch and monitor side by side",
@@ -139,57 +141,170 @@ fn wrap_block(title: &str, lines: &[Vec<StyledSpan>], term_w: usize) -> Vec<Vec<
     out
 }
 
+fn cascade_offset(i: usize, total: usize, max_shift: usize) -> usize {
+    if total <= 1 { return 0; }
+    let mid = (total - 1) as f64 / 2.0;
+    if mid <= 0.0 { return 0; }
+    let rel = (i as f64 / mid - 1.0).abs();
+    (rel * max_shift as f64).round() as usize
+}
+
 fn render_classic(components: &[&dyn Component], ctx: &RenderCtx) -> SceneOutput {
     let ascii = find_component(components, "ascii");
     let system = find_component(components, "system");
     let monitor = find_component(components, "monitor");
-    let companion = find_component(components, "companion");
 
-    let ascii_lines = ascii.map(|c| c.render_styled(ctx)).unwrap_or_default();
-    let sys_lines = system.map(|c| c.render_styled(ctx)).unwrap_or_default();
+    let (ascii_lines, ascii_w) = ascii
+        .and_then(|c| c.as_any().downcast_ref::<ascii::AsciiComponent>())
+        .map(|c| c.render_colored_lines(ctx))
+        .unwrap_or_default();
+
+    let sys = system
+        .and_then(|c| c.as_any().downcast_ref::<system::SystemComponent>());
+
+    let left_pad = ctx.cfg.panel.left_pad;
+    let right_pad = ctx.cfg.panel.right_pad;
+    let gap = ctx.cfg.panel.gap.max(1);
+    let max_shift = ctx.cfg.panel.max_shift;
+
+    let logo_origin = if ascii_w > 0 && ascii_w < ctx.term_width {
+        (ctx.term_width.saturating_sub(ascii_w)) / 2
+    } else {
+        0
+    };
+
+    // Available width for left/right panels (accounting for padding, gap, shift, and ASCII block)
+    let left_avail = logo_origin.saturating_sub(left_pad + max_shift + gap + 1).max(4);
+    let right_avail = ctx.term_width
+        .saturating_sub(logo_origin + ascii_w + gap + right_pad + max_shift + 1)
+        .max(4);
+
+    let left_lines = sys.map(|s| s.render_left_styled(ctx, left_avail)).unwrap_or_default();
+    let right_lines = sys.map(|s| s.render_right_styled(ctx, right_avail)).unwrap_or_default();
     let mon_lines = monitor.map(|c| c.render_styled(ctx)).unwrap_or_default();
 
-    let aw = ascii_lines.iter().map(|l| l.iter().map(|s| s.text.width()).sum::<usize>()).max().unwrap_or(0);
-    let gap = 2;
-    let right_w = ctx.term_width.saturating_sub(aw + gap + 4);
+    let left_w = left_lines.iter()
+        .map(|row| row.iter().map(|s| s.text.width()).sum::<usize>())
+        .max().unwrap_or(0);
+    let right_w = right_lines.iter()
+        .map(|row| row.iter().map(|s| s.text.width()).sum::<usize>())
+        .max().unwrap_or(0);
 
-    let n = ascii_lines.len().max(sys_lines.len()).max(mon_lines.len());
+    let lh = ascii_lines.len();
+    let n = left_lines.len().max(right_lines.len()).max(mon_lines.len());
+    let start_row = if lh > 0 { lh.saturating_sub(n) / 2 } else { 0 };
+    let total_rows = if lh == 0 { n } else { lh.max(start_row + n) };
+
     let mut all = Vec::new();
 
-    for i in 0..n {
+    // ── Title ──
+    let title_color = Color::from_hex_opt(&ctx.cfg.title.color).unwrap_or(Color::new(255, 154, 152));
+    let title_text = ctx.cfg.title.format
+        .replace("{user}", &ctx.info.user)
+        .replace("{host}", &ctx.info.host);
+    if !title_text.is_empty() {
+        let mut title_line = vec![
+            StyledSpan::new("  "),
+            StyledSpan::new(title_text).fg(title_color).bold(),
+        ];
+        let tw: usize = title_line.iter().map(|s| s.text.width()).sum();
+        if tw < ctx.term_width {
+            title_line.push(StyledSpan::new(" ".repeat(ctx.term_width - tw)));
+        }
+        all.push(title_line);
+    }
+
+    // ── Separator ──
+    let sep_color = Color::from_hex_opt(&ctx.cfg.separator.color).unwrap_or(Color::new(157, 133, 255));
+    let sep_len = ctx.cfg.separator.length.min(ctx.term_width.saturating_sub(4));
+    if sep_len > 0 {
+        let sep_str: String = ctx.cfg.separator.char.repeat(sep_len);
+        let mut sep_line = vec![
+            StyledSpan::new("  "),
+            StyledSpan::new(sep_str).fg(sep_color),
+        ];
+        let sw: usize = sep_line.iter().map(|s| s.text.width()).sum();
+        if sw < ctx.term_width {
+            sep_line.push(StyledSpan::new(" ".repeat(ctx.term_width - sw)));
+        }
+        all.push(sep_line);
+    }
+
+    for i in 0..total_rows {
+        let in_range = lh == 0 || (i >= start_row && i < start_row + n);
+        let row_idx = if lh > 0 { i.saturating_sub(start_row) } else { i };
+        let s = cascade_offset(row_idx, n, max_shift);
+
         let mut line = Vec::new();
-        if i < ascii_lines.len() {
-            line.extend(ascii_lines[i].clone());
-        }
-        let cur_w: usize = line.iter().map(|s| s.text.width()).sum();
-        if cur_w < aw + gap + 2 {
-            line.push(StyledSpan::new(" ".repeat(aw + gap + 2 - cur_w)));
-        }
-        if i < sys_lines.len() {
-            line.extend(sys_lines[i].clone());
-        }
-        if i < mon_lines.len() {
-            let cur_w: usize = line.iter().map(|s| s.text.width()).sum();
-            if right_w > 0 && cur_w + 2 < ctx.term_width {
-                line.push(StyledSpan::new(" ".repeat(2)));
-                line.extend(mon_lines[i].clone());
+
+        if in_range {
+            // ── Left padding with cascade shift ──
+            line.push(StyledSpan::new(" ".repeat(left_pad + s)));
+
+            // ── Left panel (right-aligned within its block) ──
+            if row_idx < left_lines.len() {
+                let cw: usize = left_lines[row_idx].iter().map(|s| s.text.width()).sum();
+                if cw < left_w {
+                    line.push(StyledSpan::new(" ".repeat(left_w - cw)));
+                }
+                line.extend(left_lines[row_idx].clone());
+            } else {
+                line.push(StyledSpan::new(" ".repeat(left_w.max(1))));
+            }
+
+            // ── Gap before ASCII ──
+            let cur: usize = line.iter().map(|s| s.text.width()).sum();
+            let target = logo_origin.saturating_sub(gap);
+            if target > cur {
+                line.push(StyledSpan::new(" ".repeat(target - cur)));
+            }
+            if ascii_w > 0 {
+                line.push(StyledSpan::new(" ".repeat(gap)));
+            }
+
+            // ── ASCII ──
+            if i < ascii_lines.len() {
+                line.extend(ascii_lines[i].clone());
+            } else if ascii_w > 0 {
+                line.push(StyledSpan::new(" ".repeat(ascii_w)));
+            }
+
+            // ── Right panel (left-aligned) ──
+            if row_idx < right_lines.len() {
+                let cur: usize = line.iter().map(|s| s.text.width()).sum();
+                let r_target = ctx.term_width.saturating_sub(right_pad + s + right_w);
+                if r_target > cur {
+                    line.push(StyledSpan::new(" ".repeat(r_target - cur)));
+                }
+                line.extend(right_lines[row_idx].clone());
+            }
+
+            // ── Monitor panel ──
+            if row_idx < mon_lines.len() {
+                let cur: usize = line.iter().map(|s| s.text.width()).sum();
+                let mon_w: usize = mon_lines[row_idx].iter().map(|s| s.text.width()).sum();
+                if cur + 2 + mon_w <= ctx.term_width {
+                    line.push(StyledSpan::new(" ".repeat(2)));
+                    line.extend(mon_lines[row_idx].clone());
+                }
+            }
+        } else {
+            // ── ASCII only (no panels) — center the logo ──
+            if logo_origin > 0 {
+                line.push(StyledSpan::new(" ".repeat(logo_origin)));
+            }
+            if i < ascii_lines.len() {
+                line.extend(ascii_lines[i].clone());
             }
         }
+
+        // ── Fill remaining width ──
         let w: usize = line.iter().map(|s| s.text.width()).sum();
         if w < ctx.term_width {
             line.push(StyledSpan::new(" ".repeat(ctx.term_width - w)));
         }
-        all.push(line);
-    }
 
-    // Companion section below the main block
-    if let Some(comp) = companion {
-        let comp_lines = comp.render_styled(ctx);
-        if !comp_lines.is_empty() {
-            let sep = "\u{2500}".repeat(ctx.term_width.min(40));
-            all.push(vec![StyledSpan::new(format!(" {} ", sep))]);
-            all.extend(comp_lines.iter().cloned());
-        }
+        all.push(line);
     }
 
     SceneOutput { lines: all }

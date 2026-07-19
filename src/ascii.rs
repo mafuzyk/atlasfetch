@@ -10,7 +10,6 @@
 use color_eyre::Result;
 use std::fs;
 use std::path::PathBuf;
-
 use crate::config;
 
 include!(concat!(env!("OUT_DIR"), "/logos_generated.rs"));

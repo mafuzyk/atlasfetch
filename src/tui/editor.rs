@@ -111,6 +111,7 @@ enum InputMode {
     EditingHexColor(usize),
     PastingAscii,
     BrowsingFile,
+    SearchingAscii,
 }
 
 // ── Editor state ─────────────────────────────────────────────────────────
@@ -344,20 +345,6 @@ impl Editor {
 
         let mut lines: Vec<Line> = Vec::new();
 
-        let title_text = self.cfg.title.format
-            .replace("{user}", &self.info.user)
-            .replace("{host}", &self.info.host);
-        if !title_text.is_empty() {
-            let title_color = tui_color(&Color::from_hex_opt(&self.cfg.title.color).unwrap_or(Color::new(255, 154, 152)));
-            lines.push(Line::from(vec![Span::raw("  "), Span::styled(title_text, Style::default().fg(title_color).add_modifier(Modifier::BOLD))]));
-        }
-
-        if !self.cfg.separator.char.is_empty() {
-            let sep_color = tui_color(&Color::from_hex_opt(&self.cfg.separator.color).unwrap_or(Color::new(157, 133, 255)));
-            let sep_str: String = self.cfg.separator.char.repeat(tw.min(40));
-            lines.push(Line::from(vec![Span::raw("  "), Span::styled(sep_str, Style::default().fg(sep_color))]));
-        }
-
         for output_line in &output.lines {
             let spans: Vec<Span> = output_line.iter().map(|s| {
                 let mut style = Style::default();
@@ -402,7 +389,7 @@ fn render_editor(frame: &mut Frame, editor: &mut Editor) {
         editor.dirty = true;
     }
 
-    if editor.input_mode != InputMode::Normal {
+    if editor.input_mode != InputMode::Normal && editor.input_mode != InputMode::SearchingAscii {
         render_overlay(frame, area, editor);
     } else {
         render_sidebar(frame, content, editor);
@@ -460,11 +447,11 @@ fn render_overlay(frame: &mut Frame, area: Rect, editor: &Editor) {
         InputMode::EditingHexColor(_) => Text::from(vec![
             Line::from("Edit hex color value (e.g. #FF6692)"),
         ]),
+        InputMode::SearchingAscii => unreachable!(),
         InputMode::Normal => unreachable!(),
     };
     let block = Block::default().borders(Borders::ALL).border_type(BorderType::Rounded);
     let p = Paragraph::new(text).block(block);
-    frame.render_widget(Clear, area);
     frame.render_widget(p, area);
 }
 
@@ -483,7 +470,7 @@ fn render_tabs(frame: &mut Frame, area: Rect, editor: &Editor) {
         let active = *t == editor.tab;
         Span::styled(t.label(), if active { Style::default().fg(TuiColor::Rgb(157, 133, 255)).add_modifier(Modifier::BOLD) } else { Style::default().fg(TuiColor::Rgb(120, 120, 120)) })
     }).collect();
-    frame.render_widget(Paragraph::new(Line::from(tabs)).style(Style::default().bg(TuiColor::Rgb(20, 20, 20))), area);
+    frame.render_widget(Paragraph::new(Line::from(tabs)), area);
 }
 
 fn render_hints(frame: &mut Frame, area: Rect, editor: &Editor) {
@@ -492,11 +479,11 @@ fn render_hints(frame: &mut Frame, area: Rect, editor: &Editor) {
         Tab::Theme   => " ↑↓ theme  c custom palette  v toggle direction  Tab/Enter next  q quit",
         Tab::Mode    => " ↑↓ mode  Tab/Enter next  q quit",
         Tab::Layout  => " ↑↓ scene  Tab/Enter next  q quit",
-        Tab::Ascii   => " ↑↓ logo  type to search  d disable  c file  p paste  Tab/Enter next  q quit",
+        Tab::Ascii   => " ↑↓ logo  / search  d disable  c file  p paste  Tab/Enter next  q quit",
         Tab::Panels  => " ↑↓ nav  Space toggle  [/] panel  a add  d delete  r reorder  e edit label  Tab/Enter next  q quit",
         Tab::Save    => " s save & exit  q discard",
     };
-    frame.render_widget(Paragraph::new(Line::from(Span::styled(text, Style::default().fg(TuiColor::Rgb(140, 140, 140))))).style(Style::default().bg(TuiColor::Rgb(15, 15, 15))), area);
+    frame.render_widget(Paragraph::new(Line::from(Span::styled(text, Style::default().fg(TuiColor::Rgb(140, 140, 140))))), area);
 }
 
 fn render_tab_content(frame: &mut Frame, area: Rect, editor: &Editor) {
@@ -618,9 +605,6 @@ fn render_ascii_tab(frame: &mut Frame, area: Rect, editor: &Editor) {
     let q = editor.ascii_search.to_lowercase();
     let n = editor.logo_keys.len();
 
-    // Split area: list on left, preview/count on right
-    let c = ratatui::layout::Layout::horizontal([Constraint::Fill(1), Constraint::Length(24)]).split(area);
-
     let items: Vec<ListItem> = editor.logo_keys.iter().enumerate()
         .filter(|(_, key)| q.is_empty() || key.to_lowercase().contains(&q))
         .map(|(i, key)| {
@@ -658,10 +642,15 @@ fn render_ascii_tab(frame: &mut Frame, area: Rect, editor: &Editor) {
         Span::styled("[ Disabled ]", if disabled { Style::default().fg(TuiColor::Rgb(255,102,146)).add_modifier(Modifier::BOLD) } else { Style::default().fg(TuiColor::Rgb(200,200,200)) }),
     ])));
 
-    let search_hint = if editor.ascii_search.is_empty() {
-        " Search: type to filter".to_string()
+
+    let search_hint = if editor.input_mode == InputMode::SearchingAscii {
+        if editor.ascii_search.is_empty() {
+            " Search: type to filter (Esc to cancel)".to_string()
+        } else {
+            format!(" Search: {}", editor.ascii_search)
+        }
     } else {
-        format!(" Search: {}", editor.ascii_search)
+        " / to search".to_string()
     };
 
     let list_block = Block::default()
@@ -670,30 +659,8 @@ fn render_ascii_tab(frame: &mut Frame, area: Rect, editor: &Editor) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(TuiColor::Rgb(255, 184, 131)));
-    frame.render_widget(List::new(items).block(list_block), c[0]);
-
-    // Mini preview panel on the right
-    let preview_block = Block::default()
-        .title("Preview")
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(TuiColor::Rgb(133, 188, 255)));
-    let inner = preview_block.inner(c[1]);
-    frame.render_widget(Clear, c[1]);
-    frame.render_widget(preview_block, c[1]);
-
-    let mut mini: Vec<Line> = editor.ascii_art.lines()
-        .take(inner.height as usize)
-        .map(|l| {
-            let cleaned: String = l.chars().map(|c| if c == '\u{2800}' { ' ' } else { c }).collect();
-            Line::from(Span::styled(cleaned, Style::default().fg(TuiColor::Rgb(200, 200, 220))))
-        })
-        .collect();
-    // Fill remaining height
-    while mini.len() < inner.height as usize {
-        mini.push(Line::from(Span::raw("")));
-    }
-    frame.render_widget(Paragraph::new(Text::from(mini)), inner);
+    let mut list_state = ratatui::widgets::ListState::default().with_selected(Some(editor.ascii_selected));
+    frame.render_stateful_widget(List::new(items).block(list_block), area, &mut list_state);
 }
 
 // ── Panels tab ───────────────────────────────────────────────────────────
@@ -921,6 +888,46 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
                 }
                 return Ok(true);
             }
+            InputMode::SearchingAscii => {
+                match key.code {
+                    KeyCode::Esc => {
+                        editor.ascii_search.clear();
+                        editor.input_mode = InputMode::Normal;
+                    }
+                    KeyCode::Backspace => {
+                        if !editor.ascii_search.is_empty() {
+                            editor.ascii_search.pop();
+                            let q = editor.ascii_search.to_lowercase();
+                            let n = editor.logo_keys.len();
+                            if !q.is_empty() {
+                                if editor.ascii_selected < n && !editor.logo_keys[editor.ascii_selected].to_lowercase().contains(&q) {
+                                    editor.ascii_selected = editor.logo_keys.iter().position(|k| k.to_lowercase().contains(&q)).unwrap_or(0);
+                                }
+                            }
+                            editor.dirty = true;
+                        }
+                    }
+                    KeyCode::Char(ch) if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' => {
+                        editor.ascii_search.push(ch);
+                        let q = editor.ascii_search.to_lowercase();
+                        let n = editor.logo_keys.len();
+                        if editor.ascii_selected >= n || !editor.logo_keys[editor.ascii_selected].to_lowercase().contains(&q) {
+                            editor.ascii_selected = editor.logo_keys.iter().position(|k| k.to_lowercase().contains(&q)).unwrap_or(0);
+                            if editor.ascii_selected < n {
+                                let key = &editor.logo_keys[editor.ascii_selected];
+                                editor.ascii_source = format!("builtin:{}", key);
+                                editor.cfg.logo.key = key.clone();
+                                if let Ok(art) = ascii::load(&editor.cfg) {
+                                    editor.ascii_art = art;
+                                }
+                            }
+                        }
+                        editor.dirty = true;
+                    }
+                    _ => {}
+                }
+                return Ok(true);
+            }
             InputMode::Normal => {}
         }
 
@@ -1110,6 +1117,9 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
                 if editor.tab == Tab::Panels {
                     editor.panel_focus = !editor.panel_focus;
                 }
+                if editor.tab == Tab::Ascii {
+                    editor.input_mode = InputMode::SearchingAscii;
+                }
             }
             KeyCode::Char('a') => {
                 if editor.tab == Tab::Panels {
@@ -1186,44 +1196,8 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
                 }
             }
             KeyCode::Esc => {
-                if editor.tab == Tab::Ascii && !editor.ascii_search.is_empty() {
-                    editor.ascii_search.clear();
-                } else {
-                    if editor.tab == Tab::Save { return Ok(false); }
-                    return Ok(false);
-                }
-            }
-            KeyCode::Backspace => {
-                if editor.tab == Tab::Ascii && !editor.ascii_search.is_empty() {
-                    editor.ascii_search.pop();
-                    let q = editor.ascii_search.to_lowercase();
-                    if !q.is_empty() {
-                        let n = editor.logo_keys.len();
-                        if editor.ascii_selected < n && !editor.logo_keys[editor.ascii_selected].to_lowercase().contains(&q) {
-                            editor.ascii_selected = editor.logo_keys.iter().position(|k| k.to_lowercase().contains(&q)).unwrap_or(0);
-                        }
-                    }
-                    editor.dirty = true;
-                }
-            }
-            KeyCode::Char(ch) => {
-                if editor.tab == Tab::Ascii && (ch.is_ascii_alphanumeric() || ch == '-' || ch == '_') {
-                    editor.ascii_search.push(ch);
-                    let q = editor.ascii_search.to_lowercase();
-                    let n = editor.logo_keys.len();
-                    if editor.ascii_selected >= n || !editor.logo_keys[editor.ascii_selected].to_lowercase().contains(&q) {
-                        editor.ascii_selected = editor.logo_keys.iter().position(|k| k.to_lowercase().contains(&q)).unwrap_or(0);
-                        if editor.ascii_selected < n {
-                            let key = &editor.logo_keys[editor.ascii_selected];
-                            editor.ascii_source = format!("builtin:{}", key);
-                            editor.cfg.logo.key = key.clone();
-                            if let Ok(art) = ascii::load(&editor.cfg) {
-                                editor.ascii_art = art;
-                            }
-                        }
-                    }
-                    editor.dirty = true;
-                }
+                if editor.tab == Tab::Save { return Ok(false); }
+                return Ok(false);
             }
             _ => {}
         }

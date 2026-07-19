@@ -1,9 +1,52 @@
 use unicode_width::UnicodeWidthStr;
 
 use super::{Component, RenderCtx, StyledSpan};
+use crate::theme::Color;
 use crate::widget::{FieldWidget, RenderCtx as WidgetCtx};
 
 pub struct SystemComponent;
+
+impl SystemComponent {
+    pub fn render_left_styled(&self, ctx: &RenderCtx, avail: usize) -> Vec<Vec<StyledSpan>> {
+        let mut lines = Vec::new();
+        for (i, fd) in ctx.cfg.display.left.iter().filter(|f| f.enabled).enumerate() {
+            let p = ctx.palette.get(i % ctx.palette.len().max(1)).copied().unwrap_or(Color::new(200, 200, 200));
+            let wctx = WidgetCtx {
+                info: ctx.info,
+                panel_cfg: &ctx.cfg.panel,
+                max_width: avail,
+                fg_color: p,
+            };
+            let out = FieldWidget::from_def(fd.clone()).render_inherent(&wctx);
+            let mut row = Vec::new();
+            for s in &out.styled {
+                row.push(StyledSpan::new(&s.text).fg(s.fg.unwrap_or(Color::new(200, 200, 200))));
+            }
+            lines.push(row);
+        }
+        lines
+    }
+
+    pub fn render_right_styled(&self, ctx: &RenderCtx, avail: usize) -> Vec<Vec<StyledSpan>> {
+        let mut lines = Vec::new();
+        for (i, fd) in ctx.cfg.display.right.iter().filter(|f| f.enabled).enumerate() {
+            let offset = (ctx.palette.len() / 2).max(1);
+            let wctx = WidgetCtx {
+                info: ctx.info,
+                panel_cfg: &ctx.cfg.panel,
+                max_width: avail,
+                fg_color: ctx.palette.get((i + offset) % ctx.palette.len()).copied().unwrap_or(Color::new(200, 200, 200)),
+            };
+            let out = FieldWidget::from_def(fd.clone()).render_inherent(&wctx);
+            let mut row = Vec::new();
+            for s in &out.styled {
+                row.push(StyledSpan::new(&s.text).fg(s.fg.unwrap_or(Color::new(200, 200, 200))));
+            }
+            lines.push(row);
+        }
+        lines
+    }
+}
 
 impl Component for SystemComponent {
     fn name(&self) -> &str { "system" }
@@ -36,7 +79,8 @@ impl Component for SystemComponent {
             let mut line = Vec::new();
 
             if let Some(fd) = left.get(i).filter(|f| f.enabled) {
-                let wctx = WidgetCtx { info: ctx.info, panel_cfg: &ctx.cfg.panel, max_width: half.saturating_sub(4), fg_color: ctx.palette.get(i).copied().unwrap_or(crate::theme::Color::new(200, 200, 200)) };
+                let p = ctx.palette.get(i % ctx.palette.len().max(1)).copied().unwrap_or(crate::theme::Color::new(200, 200, 200));
+                let wctx = WidgetCtx { info: ctx.info, panel_cfg: &ctx.cfg.panel, max_width: half.saturating_sub(4), fg_color: p };
                 let out = FieldWidget::from_def(fd.clone()).render_inherent(&wctx);
                 for s in &out.styled {
                     line.push(StyledSpan::new(&s.text).fg(s.fg.unwrap_or(crate::theme::Color::new(200, 200, 200))));
@@ -64,4 +108,5 @@ impl Component for SystemComponent {
 
     fn min_width(&self) -> usize { 30 }
     fn min_height(&self) -> usize { 5 }
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }

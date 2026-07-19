@@ -391,6 +391,7 @@ impl Config {
                 path: default_logo_path(),
                 colors,
                 color_dir: default_color_dir(),
+
             },
             title: TitleConfig {
                 format: default_title_format(),
@@ -432,6 +433,7 @@ impl Config {
                 path: default_logo_path(),
                 colors,
                 color_dir: default_color_dir(),
+
             },
             title: TitleConfig {
                 format: default_title_format(),

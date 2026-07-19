@@ -286,6 +286,7 @@ impl Component for MonitorComponent {
 
     fn min_width(&self) -> usize { 25 }
     fn min_height(&self) -> usize { 6 }
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 fn parse_disk_pct(s: &str) -> f64 {

@@ -101,4 +101,5 @@ impl Component for CompanionComponent {
 
     fn min_width(&self) -> usize { 20 }
     fn min_height(&self) -> usize { 5 }
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }

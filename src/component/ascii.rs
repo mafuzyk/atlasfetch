@@ -10,6 +10,44 @@ pub struct AsciiComponent {
 
 impl AsciiComponent {
     pub fn new(art: String) -> Self { Self { art } }
+
+    pub fn render_colored_lines(&self, ctx: &RenderCtx) -> (Vec<Vec<StyledSpan>>, usize) {
+        let raw: Vec<&str> = self.art.lines().collect();
+        if raw.is_empty() { return (Vec::new(), 0); }
+
+        let lines: Vec<String> = raw.iter().map(|l| l.trim_end().to_string()).collect();
+        let max_w = lines.iter().map(|l| l.width()).max().unwrap_or(0);
+        let cols = ctx.palette;
+        let total = lines.len();
+        let is_vert = ctx.cfg.logo.color_dir == "vertical";
+
+        let mut result = Vec::new();
+        for (i, line) in lines.iter().enumerate() {
+            let mut spans = Vec::new();
+            let mut col = 0usize;
+            for ch in line.chars() {
+                let w = ch.width().unwrap_or(0);
+                let flag_c = crate::theme::flag_color_at(cols, i, col, total, max_w, false);
+                let color = flag_c.unwrap_or_else(|| {
+                    let idx = if is_vert { col } else { i };
+                    cols.get(crate::theme::stretch_index(idx, if is_vert { max_w } else { total }, cols.len()))
+                        .copied().unwrap_or(Color::new(255, 255, 255))
+                });
+                if ch != ' ' {
+                    spans.push(StyledSpan::new(ch.to_string()).fg(color));
+                } else {
+                    spans.push(StyledSpan::new(" "));
+                }
+                col += w;
+            }
+            let row_w: usize = spans.iter().map(|s| s.text.width()).sum();
+            if row_w < max_w {
+                spans.push(StyledSpan::new(" ".repeat(max_w - row_w)));
+            }
+            result.push(spans);
+        }
+        (result, max_w)
+    }
 }
 
 impl Component for AsciiComponent {
@@ -78,4 +116,5 @@ impl Component for AsciiComponent {
     fn min_height(&self) -> usize {
         self.art.lines().count()
     }
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
