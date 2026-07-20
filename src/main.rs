@@ -210,7 +210,7 @@ fn main() -> Result<()> {
             "classic" => component::Scene::Classic,
             "dashboard" => component::Scene::Dashboard,
             "cockpit" => component::Scene::Cockpit,
-            "split" | "split-monitor" => component::Scene::SplitMonitor,
+            "classicfetch" | "classic_fetch" => component::Scene::ClassicFetch,
             _ => {
                 eprintln!("Unknown scene '{}'. Available: classic, dashboard, cockpit, split", s);
                 return Ok(());
@@ -269,7 +269,7 @@ fn main() -> Result<()> {
     let scene = match cfg.scene.as_str() {
         "dashboard" => component::Scene::Dashboard,
         "cockpit" => component::Scene::Cockpit,
-        "split" | "split-monitor" => component::Scene::SplitMonitor,
+        "classicfetch" | "classic_fetch" => component::Scene::ClassicFetch,
         _ => component::Scene::Classic,
     };
 

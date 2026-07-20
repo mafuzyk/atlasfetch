@@ -28,20 +28,18 @@ enum Tab {
     Welcome,
     Theme,
     Mode,
-    Layout,
     Panels,
     Ascii,
     Save,
 }
 
 impl Tab {
-    fn all() -> [Tab; 7] { [Tab::Welcome, Tab::Theme, Tab::Mode, Tab::Layout, Tab::Panels, Tab::Ascii, Tab::Save] }
+    fn all() -> [Tab; 6] { [Tab::Welcome, Tab::Theme, Tab::Mode, Tab::Panels, Tab::Ascii, Tab::Save] }
     fn label(&self) -> &'static str {
         match self {
             Tab::Welcome => " Welcome ",
             Tab::Theme   => " Theme ",
             Tab::Mode    => " Mode ",
-            Tab::Layout  => " Layout ",
             Tab::Panels  => " Panels ",
             Tab::Ascii   => " ASCII ",
             Tab::Save    => " Save ",
@@ -51,8 +49,7 @@ impl Tab {
         match self {
             Tab::Welcome => Tab::Theme,
             Tab::Theme   => Tab::Mode,
-            Tab::Mode    => Tab::Layout,
-            Tab::Layout  => Tab::Panels,
+            Tab::Mode    => Tab::Panels,
             Tab::Panels  => Tab::Ascii,
             Tab::Ascii   => Tab::Save,
             Tab::Save    => Tab::Welcome,
@@ -63,39 +60,9 @@ impl Tab {
             Tab::Welcome => Tab::Save,
             Tab::Save    => Tab::Ascii,
             Tab::Ascii   => Tab::Panels,
-            Tab::Panels  => Tab::Layout,
-            Tab::Layout  => Tab::Mode,
+            Tab::Panels  => Tab::Mode,
             Tab::Mode    => Tab::Theme,
             Tab::Theme   => Tab::Welcome,
-        }
-    }
-}
-
-// ── Display Mode ─────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum DisplayMode {
-    Desktop,
-    Companion,
-    Monitor,
-}
-
-impl DisplayMode {
-    fn all() -> &'static [DisplayMode] {
-        &[DisplayMode::Desktop, DisplayMode::Companion, DisplayMode::Monitor]
-    }
-    fn name(&self) -> &'static str {
-        match self {
-            DisplayMode::Desktop => "Desktop",
-            DisplayMode::Companion => "Companion",
-            DisplayMode::Monitor => "Monitor",
-        }
-    }
-    fn desc(&self) -> &'static str {
-        match self {
-            DisplayMode::Desktop => "Full fetch with ASCII art and panels",
-            DisplayMode::Companion => "Compact, minimal info always visible",
-            DisplayMode::Monitor => "Live system resource overview",
         }
     }
 }
@@ -108,7 +75,6 @@ enum InputMode {
     EditingCustomPalette,
     EditingLabel,
     AddingPanel,
-    EditingHexColor(usize),
     PastingAscii,
     BrowsingFile,
     SearchingAscii,
@@ -121,9 +87,8 @@ pub struct Editor {
     info: crate::info::SysInfo,
     tab: Tab,
     app_layout: AppLayout,
-    display_mode: DisplayMode,
-    mode_selected: usize,
-    mode_focus: bool, // false = display modes, true = layouts
+    monitor_mode: bool,
+    scene_focus: bool, // false = scenes, true = layouts
     // Theme
     themes: Vec<theme::Theme>,
     theme_selected: usize,
@@ -131,6 +96,7 @@ pub struct Editor {
     // ASCII
     logo_keys: Vec<String>,
     ascii_art: String,
+    ascii_component: component::ascii::AsciiComponent,
     ascii_source: String, // "builtin:key" | "file:path" | "pasted" | "disabled"
     ascii_is_small: bool,
     // Panels
@@ -144,11 +110,16 @@ pub struct Editor {
     file_browser_cwd: std::path::PathBuf,
     file_browser_entries: Vec<(String, bool)>,
     file_browser_sel: usize,
-    // Layout selection
+    // Scene / Layout
+    scene_selected: usize,
     layout_selected: usize,
     // ASCII selection
     ascii_selected: usize,
     ascii_search: String,
+    // Cached components
+    monitor_comp: component::monitor::MonitorComponent,
+    system_comp: component::system::SystemComponent,
+    companion_comp: component::companion::CompanionComponent,
     // General
     input_mode: InputMode,
     paste_buffer: String,
@@ -182,8 +153,10 @@ impl Editor {
             format!("builtin:{}", cfg.logo.key)
         };
 
-        // Detect app layout from config
-        let app_layout = AppLayout::Centered; // default
+        let app_layout = AppLayout::Centered;
+        let scene_selected = component::Scene::all().iter()
+            .position(|s| s.name().to_lowercase() == cfg.scene)
+            .unwrap_or(0);
 
         let themes = theme::all_themes();
         let theme_selected = themes.iter().position(|t| t.colors == cfg.logo.colors).unwrap_or(0);
@@ -216,7 +189,6 @@ impl Editor {
                 ("snap","\u{f1b3}","Snap"),
             ].into_iter().map(|(k,i,l)| (k.to_string(),i.to_string(),l.to_string())).collect()
         };
-        // Append progress-bar variants for numeric fields
         let bar_fields = ["cpu", "gpu", "memory", "disk", "vram", "load", "cpu_temp", "battery_level", "brightness", "signal", "storage"];
         for &base in &bar_fields {
             if let Some((_, icon, label)) = available.iter().find(|(k, _, _)| k == base) {
@@ -226,8 +198,7 @@ impl Editor {
 
         let (tw, th) = terminal::size()?;
         let layout_selected = AppLayout::pc_variants().iter().position(|l| *l == app_layout).unwrap_or(0);
-        let display_mode = DisplayMode::Desktop;
-        let mode_selected = 0;
+        let ascii_component = component::ascii::AsciiComponent::new(ascii_art.clone());
         let ascii_selected = match ascii_source.split_once(':') {
             Some(("builtin", k)) => logo_keys.iter().position(|lk| lk == k).unwrap_or(0),
             _ if ascii_source.starts_with("file:") => logo_keys.len(),
@@ -236,9 +207,9 @@ impl Editor {
         };
         let mut ed = Self {
             cfg, info, tab: Tab::Welcome, app_layout, layout_selected,
-            display_mode, mode_selected, mode_focus: false,
+            scene_selected, scene_focus: false, monitor_mode: false,
             themes, theme_selected, custom_palette_input: String::new(),
-            logo_keys, ascii_art, ascii_source, ascii_selected,
+            logo_keys, ascii_art, ascii_component, ascii_source, ascii_selected,
             ascii_search: String::new(), ascii_is_small,
             panel_focus: false, panel_left_sel: 0, panel_right_sel: 0,
             add_panel_available: available,
@@ -247,6 +218,9 @@ impl Editor {
             file_browser_cwd: std::env::current_dir().unwrap_or_else(|_| "/".into()),
             file_browser_entries: Vec::new(),
             file_browser_sel: 0,
+            monitor_comp: component::monitor::MonitorComponent::new(),
+            system_comp: component::system::SystemComponent,
+            companion_comp: component::companion::CompanionComponent,
             input_mode: InputMode::Normal,
             paste_buffer: String::new(),
             saved: false,
@@ -315,24 +289,56 @@ impl Editor {
         }
     }
 
+    fn filtered_logo_indices(&self) -> Vec<usize> {
+        let q = self.ascii_search.to_lowercase();
+        self.logo_keys.iter().enumerate()
+            .filter(|(_, k)| q.is_empty() || k.to_lowercase().contains(&q))
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    fn select_logo_at(&mut self, idx: usize) {
+        if idx < self.logo_keys.len() {
+            self.ascii_selected = idx;
+            let key = &self.logo_keys[idx];
+            self.ascii_source = format!("builtin:{}", key);
+            self.cfg.logo.key = key.clone();
+            if let Ok(art) = ascii::load(&self.cfg) {
+                self.ascii_art = art;
+            }
+            self.dirty = true;
+        }
+    }
+
+    fn jump_to_first_matching_logo(&mut self) {
+        let filtered = self.filtered_logo_indices();
+        if let Some(&first) = filtered.first() {
+            if self.ascii_selected >= self.logo_keys.len() || !filtered.contains(&self.ascii_selected) {
+                self.select_logo_at(first);
+            }
+        }
+    }
+
     fn refresh_preview(&mut self) {
         self.ensure_ascii_fits();
-
         let tw = self.preview_width.max(20);
 
         let scene = match self.cfg.scene.as_str() {
             "dashboard" => component::Scene::Dashboard,
             "cockpit" => component::Scene::Cockpit,
-            "split" | "split-monitor" => component::Scene::SplitMonitor,
+            "classicfetch" | "classic_fetch" => component::Scene::ClassicFetch,
             _ => component::Scene::Classic,
         };
 
+        self.ascii_component = component::ascii::AsciiComponent::new(self.ascii_art.clone());
+
         use component::Component;
-        let ascii_comp = component::ascii::AsciiComponent::new(self.ascii_art.clone());
-        let system_comp = component::system::SystemComponent;
-        let monitor_comp = component::monitor::MonitorComponent::new();
-        let companion_comp = component::companion::CompanionComponent;
-        let components: Vec<&dyn Component> = vec![&ascii_comp, &system_comp, &monitor_comp, &companion_comp];
+        let components: Vec<&dyn Component> = vec![
+            &self.ascii_component,
+            &self.system_comp,
+            &self.monitor_comp,
+            &self.companion_comp,
+        ];
 
         let ctx = component::RenderCtx {
             info: &self.info,
@@ -341,7 +347,11 @@ impl Editor {
             palette: &self.cfg.logo.colors,
         };
 
-        let output = component::render_scene(scene, &components, &ctx);
+        let output = if self.monitor_mode {
+            component::render_monitor_split(&components, &ctx)
+        } else {
+            component::render_scene(scene, &components, &ctx)
+        };
 
         let mut lines: Vec<Line> = Vec::new();
 
@@ -434,7 +444,7 @@ fn render_overlay(frame: &mut Frame, area: Rect, editor: &Editor) {
         ]),
         InputMode::BrowsingFile => {
             let items: Vec<ListItem> = editor.file_browser_entries.iter().map(|(name, is_dir)| {
-                let prefix = if *is_dir { "📁 " } else { "📄 " };
+                let prefix = if *is_dir { "[DIR] " } else { "[FILE] " };
                 ListItem::new(format!("{}{}", prefix, name))
             }).collect();
             let list = List::new(items)
@@ -444,9 +454,6 @@ fn render_overlay(frame: &mut Frame, area: Rect, editor: &Editor) {
             frame.render_widget(list, area);
             return;
         }
-        InputMode::EditingHexColor(_) => Text::from(vec![
-            Line::from("Edit hex color value (e.g. #FF6692)"),
-        ]),
         InputMode::SearchingAscii => unreachable!(),
         InputMode::Normal => unreachable!(),
     };
@@ -477,8 +484,7 @@ fn render_hints(frame: &mut Frame, area: Rect, editor: &Editor) {
     let text = match editor.tab {
         Tab::Welcome => " Tab/Enter next  q quit",
         Tab::Theme   => " ↑↓ theme  c custom palette  v toggle direction  Tab/Enter next  q quit",
-        Tab::Mode    => " ↑↓ mode  Tab/Enter next  q quit",
-        Tab::Layout  => " ↑↓ scene  Tab/Enter next  q quit",
+        Tab::Mode    => " ↑↓ scene/layout  ←→ focus  m monitor  Tab/Enter next  q quit",
         Tab::Ascii   => " ↑↓ logo  / search  d disable  c file  p paste  Tab/Enter next  q quit",
         Tab::Panels  => " ↑↓ nav  Space toggle  [/] panel  a add  d delete  r reorder  e edit label  Tab/Enter next  q quit",
         Tab::Save    => " s save & exit  q discard",
@@ -491,7 +497,6 @@ fn render_tab_content(frame: &mut Frame, area: Rect, editor: &Editor) {
         Tab::Welcome => render_welcome_tab(frame, area, editor),
         Tab::Theme   => render_theme_tab(frame, area, editor),
         Tab::Mode    => render_mode_tab(frame, area, editor),
-        Tab::Layout  => render_layout_tab(frame, area, editor),
         Tab::Ascii   => render_ascii_tab(frame, area, editor),
         Tab::Panels  => render_panels_tab(frame, area, editor),
         Tab::Save    => render_save_tab(frame, area, editor),
@@ -508,11 +513,10 @@ fn render_welcome_tab(frame: &mut Frame, area: Rect, _editor: &Editor) {
             Line::from("  Use Tab to navigate through the configuration tabs:"),
             Line::from(""),
             Line::from("  1. Theme  — pick a color theme for your fetch"),
-            Line::from("  2. Mode   — choose a display preset (Desktop/Companion/Monitor)"),
-            Line::from("  3. Layout — adjust panel spacing and alignment"),
-            Line::from("  4. Panels — add, remove, and reorder info fields"),
-            Line::from("  5. ASCII  — select or disable ASCII art logos"),
-            Line::from("  6. Save   — save your configuration"),
+            Line::from("  2. Mode   — choose scene, layout, or Monitor mode"),
+            Line::from("  3. Panels — add, remove, and reorder info fields"),
+            Line::from("  4. ASCII  — select or disable ASCII art logos"),
+            Line::from("  5. Save   — save your configuration"),
             Line::from(""),
             Line::from(Span::styled("  Press Tab or Enter to start configuring!", Style::default().fg(TuiColor::Rgb(157, 133, 255)))),
         ]))
@@ -523,26 +527,60 @@ fn render_welcome_tab(frame: &mut Frame, area: Rect, _editor: &Editor) {
 // ── Mode tab ─────────────────────────────────────────────────────────────
 
 fn render_mode_tab(frame: &mut Frame, area: Rect, editor: &Editor) {
-    let halves = ratatui::layout::Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(area);
-    let modes = DisplayMode::all();
-    let mode_items: Vec<ListItem> = modes.iter().enumerate().map(|(i, m)| {
-        let sel = !editor.mode_focus && i == editor.mode_selected;
+    let rows = ratatui::layout::Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]).split(area);
+
+    // Monitor toggle
+    let monitor_label = if editor.monitor_mode { "▶ Monitor Mode" } else { "  Monitor Mode" };
+    let monitor_style = if editor.monitor_mode {
+        Style::default().fg(TuiColor::Rgb(255, 102, 146)).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(TuiColor::Rgb(140, 140, 140))
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(monitor_label, monitor_style),
+            Span::styled(" — Split 50/50: fetch + live monitor", Style::default().fg(TuiColor::Rgb(120, 120, 120))),
+        ])),
+        rows[0],
+    );
+
+    if editor.monitor_mode {
+        // In monitor mode, just show info
+        frame.render_widget(
+            Paragraph::new(Text::from(vec![
+                Line::from(""),
+                Line::from(Span::styled("  Monitor Mode active", Style::default().fg(TuiColor::Rgb(255, 102, 146)).add_modifier(Modifier::BOLD))),
+                Line::from("  Press m to toggle off"),
+                Line::from(""),
+                Line::from("  The preview shows a 50/50 split between your"),
+                Line::from("  selected fetch layout and live system monitoring."),
+            ])),
+            rows[1],
+        );
+        return;
+    }
+
+    let halves = ratatui::layout::Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(rows[1]);
+
+    let scenes = component::Scene::all();
+    let scene_items: Vec<ListItem> = scenes.iter().enumerate().map(|(i, s)| {
+        let sel = !editor.scene_focus && i == editor.scene_selected;
         ListItem::new(Line::from(vec![
             Span::styled(if sel { "▸ " } else { "  " }, Style::default().fg(TuiColor::Rgb(133, 188, 255))),
-            Span::styled(m.name(), if sel { Style::default().fg(TuiColor::Rgb(255,255,255)).add_modifier(Modifier::BOLD) } else { Style::default().fg(TuiColor::Rgb(200,200,200)) }),
+            Span::styled(s.name(), if sel { Style::default().fg(TuiColor::Rgb(255,255,255)).add_modifier(Modifier::BOLD) } else { Style::default().fg(TuiColor::Rgb(200,200,200)) }),
             Span::raw("  "),
-            Span::styled(m.desc(), Style::default().fg(TuiColor::Rgb(120,120,120))),
+            Span::styled(s.description(), Style::default().fg(TuiColor::Rgb(120,120,120))),
         ]))
     }).collect();
-    let mode_block = Block::default()
-        .title(" Display Mode ")
+    let scene_block = Block::default()
+        .title(" Scene ")
         .borders(Borders::ALL).border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(if editor.mode_focus { TuiColor::Rgb(100,100,100) } else { TuiColor::Rgb(157, 133, 255) }));
-    frame.render_widget(List::new(mode_items).block(mode_block), halves[0]);
+        .border_style(Style::default().fg(if editor.scene_focus { TuiColor::Rgb(100,100,100) } else { TuiColor::Rgb(157, 133, 255) }));
+    frame.render_widget(List::new(scene_items).block(scene_block), halves[0]);
 
     let layouts = AppLayout::pc_variants();
     let layout_items: Vec<ListItem> = layouts.iter().enumerate().map(|(i, l)| {
-        let sel = editor.mode_focus && i == editor.layout_selected;
+        let sel = editor.scene_focus && i == editor.layout_selected;
         ListItem::new(Line::from(vec![
             Span::styled(if sel { "▶ " } else { "  " }, Style::default().fg(TuiColor::Rgb(255, 184, 131))),
             Span::styled(l.name(), if sel { Style::default().fg(TuiColor::Rgb(255,255,255)).add_modifier(Modifier::BOLD) } else { Style::default().fg(TuiColor::Rgb(200,200,200)) }),
@@ -553,24 +591,8 @@ fn render_mode_tab(frame: &mut Frame, area: Rect, editor: &Editor) {
     let layout_block = Block::default()
         .title(" Layout ")
         .borders(Borders::ALL).border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(if editor.mode_focus { TuiColor::Rgb(157, 133, 255) } else { TuiColor::Rgb(100,100,100) }));
+        .border_style(Style::default().fg(if editor.scene_focus { TuiColor::Rgb(157, 133, 255) } else { TuiColor::Rgb(100,100,100) }));
     frame.render_widget(List::new(layout_items).block(layout_block), halves[1]);
-}
-
-// ── Layout tab ───────────────────────────────────────────────────────────
-
-fn render_layout_tab(frame: &mut Frame, area: Rect, editor: &Editor) {
-    let scenes = component::Scene::all();
-    let items: Vec<ListItem> = scenes.iter().map(|s| {
-        let sel = s.name().to_lowercase() == editor.cfg.scene;
-        ListItem::new(Line::from(vec![
-            Span::styled(if sel { "▶ " } else { "  " }, Style::default().fg(TuiColor::Rgb(255, 184, 131))),
-            Span::styled(s.name(), if sel { Style::default().fg(TuiColor::Rgb(255,255,255)).add_modifier(Modifier::BOLD) } else { Style::default().fg(TuiColor::Rgb(200,200,200)) }),
-            Span::raw("  "),
-            Span::styled(s.description(), Style::default().fg(TuiColor::Rgb(120,120,120))),
-        ]))
-    }).collect();
-    frame.render_widget(List::new(items).block(Block::default().title("Scene").borders(Borders::ALL).border_type(BorderType::Rounded).border_style(Style::default().fg(TuiColor::Rgb(157, 133, 255)))), area);
 }
 
 // ── Theme tab ────────────────────────────────────────────────────────────
@@ -738,8 +760,20 @@ fn render_save_tab(frame: &mut Frame, area: Rect, editor: &Editor) {
 // ── Preview ──────────────────────────────────────────────────────────────
 
 fn render_preview_panel(frame: &mut Frame, area: Rect, editor: &Editor) {
-    let block = Block::default().title("Preview").borders(Borders::ALL).border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(TuiColor::Rgb(133, 188, 255)));
+    let title = if editor.monitor_mode {
+        " Preview — Monitor Mode  LIVE ".to_string()
+    } else {
+        let scenes = component::Scene::all();
+        let scene_name = scenes.get(editor.scene_selected).map(|s| s.name()).unwrap_or("Classic");
+        let layout_name = editor.app_layout.name();
+        format!(" Preview — {} / {} ", scene_name, layout_name)
+    };
+    let block = Block::default().title(title).borders(Borders::ALL).border_type(BorderType::Rounded)
+        .border_style(if editor.monitor_mode {
+            Style::default().fg(TuiColor::Rgb(255, 102, 146))
+        } else {
+            Style::default().fg(TuiColor::Rgb(133, 188, 255))
+        });
     let inner = block.inner(area);
     frame.render_widget(Clear, area);
     frame.render_widget(block, area);
@@ -881,47 +915,45 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
                 }
                 return Ok(true);
             }
-            InputMode::EditingHexColor(_) => {
-                match key.code {
-                    KeyCode::Esc => { editor.input_mode = InputMode::Normal; }
-                    _ => { editor.input_mode = InputMode::Normal; }
-                }
-                return Ok(true);
-            }
             InputMode::SearchingAscii => {
                 match key.code {
                     KeyCode::Esc => {
                         editor.ascii_search.clear();
                         editor.input_mode = InputMode::Normal;
                     }
+                    KeyCode::Enter | KeyCode::Tab => {
+                        editor.input_mode = InputMode::Normal;
+                    }
                     KeyCode::Backspace => {
                         if !editor.ascii_search.is_empty() {
                             editor.ascii_search.pop();
-                            let q = editor.ascii_search.to_lowercase();
-                            let n = editor.logo_keys.len();
-                            if !q.is_empty() {
-                                if editor.ascii_selected < n && !editor.logo_keys[editor.ascii_selected].to_lowercase().contains(&q) {
-                                    editor.ascii_selected = editor.logo_keys.iter().position(|k| k.to_lowercase().contains(&q)).unwrap_or(0);
-                                }
-                            }
+                            editor.jump_to_first_matching_logo();
                             editor.dirty = true;
+                        }
+                    }
+                    KeyCode::Up => {
+                        let filtered = editor.filtered_logo_indices();
+                        if let Some(pos) = filtered.iter().position(|&i| i == editor.ascii_selected) {
+                            if pos > 0 {
+                                editor.select_logo_at(filtered[pos - 1]);
+                            }
+                        } else if !filtered.is_empty() {
+                            editor.select_logo_at(filtered[filtered.len() - 1]);
+                        }
+                    }
+                    KeyCode::Down => {
+                        let filtered = editor.filtered_logo_indices();
+                        if let Some(pos) = filtered.iter().position(|&i| i == editor.ascii_selected) {
+                            if pos + 1 < filtered.len() {
+                                editor.select_logo_at(filtered[pos + 1]);
+                            }
+                        } else if !filtered.is_empty() {
+                            editor.select_logo_at(filtered[0]);
                         }
                     }
                     KeyCode::Char(ch) if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' => {
                         editor.ascii_search.push(ch);
-                        let q = editor.ascii_search.to_lowercase();
-                        let n = editor.logo_keys.len();
-                        if editor.ascii_selected >= n || !editor.logo_keys[editor.ascii_selected].to_lowercase().contains(&q) {
-                            editor.ascii_selected = editor.logo_keys.iter().position(|k| k.to_lowercase().contains(&q)).unwrap_or(0);
-                            if editor.ascii_selected < n {
-                                let key = &editor.logo_keys[editor.ascii_selected];
-                                editor.ascii_source = format!("builtin:{}", key);
-                                editor.cfg.logo.key = key.clone();
-                                if let Ok(art) = ascii::load(&editor.cfg) {
-                                    editor.ascii_art = art;
-                                }
-                            }
-                        }
+                        editor.jump_to_first_matching_logo();
                         editor.dirty = true;
                     }
                     _ => {}
@@ -940,36 +972,27 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
             KeyCode::Enter | KeyCode::Tab => { editor.tab = editor.tab.next(); }
             KeyCode::BackTab => { editor.tab = editor.tab.prev(); }
             KeyCode::Left => {
-                if editor.tab == Tab::Mode { editor.mode_focus = false; }
+                if editor.tab == Tab::Mode { editor.scene_focus = false; }
                 if editor.tab == Tab::Panels { editor.panel_focus = false; }
             }
             KeyCode::Right => {
-                if editor.tab == Tab::Mode { editor.mode_focus = true; }
+                if editor.tab == Tab::Mode { editor.scene_focus = true; }
                 if editor.tab == Tab::Panels { editor.panel_focus = true; }
             }
             KeyCode::Up => {
                 match editor.tab {
-                    Tab::Mode => {
-                        if editor.mode_focus {
+                    Tab::Mode => 'mode_up: {
+                        if editor.monitor_mode { break 'mode_up; }
+                        if editor.scene_focus {
                             editor.layout_selected = editor.layout_selected.saturating_sub(1);
                             editor.apply_layout(editor.layout_selected);
                         } else {
-                            editor.mode_selected = editor.mode_selected.saturating_sub(1);
-                            let modes = DisplayMode::all();
-                            if editor.mode_selected < modes.len() {
-                                editor.display_mode = modes[editor.mode_selected];
+                            let scenes = component::Scene::all();
+                            if editor.scene_selected > 0 {
+                                editor.scene_selected -= 1;
+                                editor.cfg.scene = scenes[editor.scene_selected].name().to_lowercase();
                                 editor.dirty = true;
-                                editor.refresh_preview();
                             }
-                        }
-                    }
-                    Tab::Layout => {
-                        let scenes = component::Scene::all();
-                        let cur = scenes.iter().position(|s| s.name().to_lowercase() == editor.cfg.scene).unwrap_or(0);
-                        let next = cur.saturating_sub(1);
-                        if next < scenes.len() {
-                            editor.cfg.scene = scenes[next].name().to_lowercase();
-                            editor.dirty = true;
                         }
                     }
                     Tab::Theme => {
@@ -980,33 +1003,19 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
                         }
                     }
                     Tab::Ascii => {
-                        let q = editor.ascii_search.to_lowercase();
+                        let filtered = editor.filtered_logo_indices();
                         let n = editor.logo_keys.len();
-                        let mut new_sel = editor.ascii_selected;
-                        loop {
-                            if new_sel == 0 { break; }
-                            new_sel -= 1;
-                            if new_sel >= n || q.is_empty() || editor.logo_keys[new_sel].to_lowercase().contains(&q) {
-                                break;
+                        if let Some(pos) = filtered.iter().position(|&i| i == editor.ascii_selected) {
+                            if pos > 0 {
+                                editor.select_logo_at(filtered[pos - 1]);
                             }
-                        }
-                        if new_sel != editor.ascii_selected {
-                            editor.ascii_selected = new_sel;
-                            let sel = editor.ascii_selected;
-                            if sel < n {
-                                let key = &editor.logo_keys[sel];
-                                editor.ascii_source = format!("builtin:{}", key);
-                                editor.cfg.logo.key = key.clone();
-                                if let Ok(art) = ascii::load(&editor.cfg) {
-                                    editor.ascii_art = art;
-                                }
-                                editor.dirty = true;
-                            } else if sel == n + 2 && n > 0 {
-                                let key = &editor.logo_keys[0];
-                                editor.ascii_source = format!("builtin:{}", key);
-                                editor.ascii_art = ascii::load(&editor.cfg).unwrap_or_default();
-                                editor.cfg.logo.key = key.clone();
-                                editor.dirty = true;
+                        } else if !filtered.is_empty() {
+                            editor.select_logo_at(filtered[filtered.len() - 1]);
+                        } else if editor.ascii_selected >= n && editor.ascii_selected != n + 2 {
+                            if !filtered.is_empty() {
+                                editor.select_logo_at(filtered[filtered.len() - 1]);
+                            } else if n > 0 {
+                                editor.select_logo_at(0);
                             }
                         }
                     }
@@ -1022,29 +1031,19 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
             }
             KeyCode::Down => {
                 match editor.tab {
-                    Tab::Mode => {
-                        if editor.mode_focus {
+                    Tab::Mode => 'mode_down: {
+                        if editor.monitor_mode { break 'mode_down; }
+                        if editor.scene_focus {
                             let max = AppLayout::pc_variants().len().saturating_sub(1);
                             editor.layout_selected = (editor.layout_selected + 1).min(max);
                             editor.apply_layout(editor.layout_selected);
                         } else {
-                            let max = DisplayMode::all().len().saturating_sub(1);
-                            editor.mode_selected = (editor.mode_selected + 1).min(max);
-                            let modes = DisplayMode::all();
-                            if editor.mode_selected < modes.len() {
-                                editor.display_mode = modes[editor.mode_selected];
+                            let scenes = component::Scene::all();
+                            if editor.scene_selected + 1 < scenes.len() {
+                                editor.scene_selected += 1;
+                                editor.cfg.scene = scenes[editor.scene_selected].name().to_lowercase();
                                 editor.dirty = true;
-                                editor.refresh_preview();
                             }
-                        }
-                    }
-                    Tab::Layout => {
-                        let scenes = component::Scene::all();
-                        let cur = scenes.iter().position(|s| s.name().to_lowercase() == editor.cfg.scene).unwrap_or(0);
-                        let next = (cur + 1).min(scenes.len().saturating_sub(1));
-                        if next < scenes.len() {
-                            editor.cfg.scene = scenes[next].name().to_lowercase();
-                            editor.dirty = true;
                         }
                     }
                     Tab::Theme => {
@@ -1056,36 +1055,29 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
                         }
                     }
                     Tab::Ascii => {
-                        let q = editor.ascii_search.to_lowercase();
+                        let filtered = editor.filtered_logo_indices();
                         let n = editor.logo_keys.len();
-                        let max = n + 2;
-                        let mut new_sel = editor.ascii_selected;
-                        loop {
-                            if new_sel >= max { break; }
-                            new_sel += 1;
-                            if new_sel > max { break; }
-                            if new_sel >= n || q.is_empty() || editor.logo_keys[new_sel].to_lowercase().contains(&q) {
-                                break;
-                            }
-                        }
-                        if new_sel != editor.ascii_selected && new_sel <= max {
-                            editor.ascii_selected = new_sel;
-                            let sel = editor.ascii_selected;
-                            if sel < n {
-                                let key = &editor.logo_keys[sel];
-                                editor.ascii_source = format!("builtin:{}", key);
-                                editor.cfg.logo.key = key.clone();
-                                if let Ok(art) = ascii::load(&editor.cfg) {
-                                    editor.ascii_art = art;
+                        if let Some(pos) = filtered.iter().position(|&i| i == editor.ascii_selected) {
+                            if pos + 1 < filtered.len() {
+                                editor.select_logo_at(filtered[pos + 1]);
+                            } else {
+                                if editor.ascii_selected < n {
+                                    editor.ascii_selected = n;
+                                    editor.dirty = true;
+                                } else if editor.ascii_selected == n {
+                                    editor.ascii_selected = n + 1;
+                                    editor.dirty = true;
+                                } else if editor.ascii_selected == n + 1 {
+                                    editor.ascii_selected = n + 2;
+                                    editor.ascii_source = "disabled".into();
+                                    editor.cfg.logo.key = String::new();
+                                    editor.cfg.logo.path = "disabled".into();
+                                    editor.ascii_art = String::new();
+                                    editor.dirty = true;
                                 }
-                                editor.dirty = true;
-                            } else if sel == n + 2 {
-                                editor.ascii_source = "disabled".into();
-                                editor.cfg.logo.key = String::new();
-                                editor.cfg.logo.path = "disabled".into();
-                                editor.ascii_art = String::new();
-                                editor.dirty = true;
                             }
+                        } else if !filtered.is_empty() {
+                            editor.select_logo_at(filtered[0]);
                         }
                     }
                     Tab::Panels => {
@@ -1111,6 +1103,12 @@ fn handle_event(editor: &mut Editor) -> Result<bool> {
                         fields[idx].enabled = !fields[idx].enabled;
                         editor.dirty = true;
                     }
+                }
+            }
+            KeyCode::Char('m') => {
+                if editor.tab == Tab::Mode {
+                    editor.monitor_mode = !editor.monitor_mode;
+                    editor.dirty = true;
                 }
             }
             KeyCode::Char('/') => {
@@ -1221,7 +1219,18 @@ pub fn run(cfg: &mut Config) -> Result<()> {
 
     let res = loop {
         terminal.draw(|frame| render_editor(frame, &mut editor))?;
-        if !handle_event(&mut editor)? {
+
+        // Auto-refresh every 1.5s when in monitor mode for live data
+        if editor.monitor_mode {
+            if crossterm::event::poll(std::time::Duration::from_millis(1500))? {
+                if !handle_event(&mut editor)? {
+                    break Ok(());
+                }
+            } else {
+                editor.dirty = true;
+                editor.refresh_preview();
+            }
+        } else if !handle_event(&mut editor)? {
             break Ok(());
         }
     };

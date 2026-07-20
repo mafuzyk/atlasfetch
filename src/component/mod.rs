@@ -50,20 +50,20 @@ pub enum Scene {
     Classic,
     Dashboard,
     Cockpit,
-    SplitMonitor,
+    ClassicFetch,
 }
 
 #[allow(dead_code)]
 impl Scene {
     pub fn all() -> &'static [Scene] {
-        &[Scene::Classic, Scene::Dashboard, Scene::Cockpit, Scene::SplitMonitor]
+        &[Scene::Classic, Scene::Dashboard, Scene::Cockpit, Scene::ClassicFetch]
     }
     pub fn name(&self) -> &'static str {
         match self {
             Scene::Classic => "Classic",
             Scene::Dashboard => "Terminal Dashboard",
             Scene::Cockpit => "Cockpit",
-            Scene::SplitMonitor => "Split Monitor",
+            Scene::ClassicFetch => "ClassicFetch",
         }
     }
     pub fn description(&self) -> &'static str {
@@ -71,7 +71,7 @@ impl Scene {
             Scene::Classic => "ASCII centered, left/right powerline panels",
             Scene::Dashboard => "Multi-panel TUI dashboard layout",
             Scene::Cockpit => "ASCII centered, panels arranged around it",
-            Scene::SplitMonitor => "Fetch and monitor side by side",
+            Scene::ClassicFetch => "Fastfetch-style: info left, logo right, no panels",
         }
     }
     pub fn min_width(&self) -> usize {
@@ -79,7 +79,7 @@ impl Scene {
             Scene::Classic => 80,
             Scene::Dashboard => 80,
             Scene::Cockpit => 60,
-            Scene::SplitMonitor => 90,
+            Scene::ClassicFetch => 70,
         }
     }
 }
@@ -113,7 +113,7 @@ pub fn render_scene(scene: Scene, components: &[&dyn Component], ctx: &RenderCtx
         Scene::Classic => render_classic(components, ctx),
         Scene::Dashboard => render_dashboard(components, ctx),
         Scene::Cockpit => render_cockpit(components, ctx),
-        Scene::SplitMonitor => render_split_monitor(components, ctx),
+        Scene::ClassicFetch => render_classicfetch(components, ctx),
     }
 }
 
@@ -410,45 +410,126 @@ fn render_cockpit(components: &[&dyn Component], ctx: &RenderCtx) -> SceneOutput
     SceneOutput { lines: all }
 }
 
-fn render_split_monitor(components: &[&dyn Component], ctx: &RenderCtx) -> SceneOutput {
+pub fn render_monitor_split(components: &[&dyn Component], ctx: &RenderCtx) -> SceneOutput {
     let ascii = find_component(components, "ascii");
     let system = find_component(components, "system");
     let monitor = find_component(components, "monitor");
 
+    let half = ctx.term_width / 2;
     let ascii_lines = ascii.map(|c| c.render_styled(ctx)).unwrap_or_default();
     let sys_lines = system.map(|c| c.render_styled(ctx)).unwrap_or_default();
-    let mon_lines = monitor.map(|c| wrap_block("MONITOR", &c.render_styled(ctx), 35)).unwrap_or_default();
 
-    let half = ctx.term_width / 2;
-    let mut all = Vec::new();
+    // Monitor rendered in its own half
+    let mon_ctx = RenderCtx {
+        info: ctx.info,
+        cfg: ctx.cfg,
+        term_width: half.saturating_sub(4),
+        palette: ctx.palette,
+    };
+    let mon_lines = monitor.map(|c| wrap_block(" MONITOR ", &c.render_styled(&mon_ctx), half.saturating_sub(4))).unwrap_or_default();
 
     let n = ascii_lines.len().max(sys_lines.len()).max(mon_lines.len());
+    let mut all = Vec::new();
+
+    all.push(vec![StyledSpan::new("\u{2501}".repeat(ctx.term_width))]);
 
     for i in 0..n {
         let mut line = Vec::new();
 
-        // Left: ASCII + system
+        // Left half: fetch (ASCII + system)
+        let mut left = Vec::new();
         if i < ascii_lines.len() {
-            line.extend(ascii_lines[i].clone());
-            let w: usize = line.iter().map(|s| s.text.width()).sum();
-            if w < half / 2 { line.push(StyledSpan::new(" ".repeat(half / 2 - w))); }
+            left.extend(ascii_lines[i].clone());
         }
         if i < sys_lines.len() {
-            line.extend(sys_lines[i].clone());
+            let w: usize = left.iter().map(|s| s.text.width()).sum();
+            if w < half {
+                // try to fit sys on same line if possible
+            }
+            left.extend(sys_lines[i].clone());
         }
-
-        let w_left: usize = line.iter().map(|s| s.text.width()).sum();
-        if w_left < half {
-            line.push(StyledSpan::new(" ".repeat(half - w_left)));
+        let w_left: usize = left.iter().map(|s| s.text.width()).sum();
+        if w_left > half {
+            // overflow — put sys on its own line
+            left.clear();
+            if i < ascii_lines.len() {
+                left.extend(ascii_lines[i].clone());
+                let w: usize = left.iter().map(|s| s.text.width()).sum();
+                if w < half { left.push(StyledSpan::new(" ".repeat(half - w))); }
+            }
+        } else {
+            if w_left < half {
+                left.push(StyledSpan::new(" ".repeat(half - w_left)));
+            }
         }
+        line.extend(left);
 
-        // Right: monitor
+        // Right half: monitor
         if i < mon_lines.len() {
             line.extend(mon_lines[i].clone());
+        } else {
+            line.push(StyledSpan::new(" ".repeat(half.saturating_sub(4))));
         }
 
         let w: usize = line.iter().map(|s| s.text.width()).sum();
-        if w < ctx.term_width { line.push(StyledSpan::new(" ".repeat(ctx.term_width - w))); }
+        if w < ctx.term_width {
+            line.push(StyledSpan::new(" ".repeat(ctx.term_width - w)));
+        }
+        all.push(line);
+    }
+
+    all.push(vec![StyledSpan::new("\u{2501}".repeat(ctx.term_width))]);
+    SceneOutput { lines: all }
+}
+
+fn render_classicfetch(components: &[&dyn Component], ctx: &RenderCtx) -> SceneOutput {
+    let ascii = find_component(components, "ascii");
+    let system = find_component(components, "system");
+
+    let ascii_lines = ascii.map(|c| c.render_styled(ctx)).unwrap_or_default();
+    let sys_lines = system.map(|c| c.render_styled(ctx)).unwrap_or_default();
+    let ascii_w = ascii_lines.iter()
+        .flat_map(|l| l.iter())
+        .map(|s| s.text.width())
+        .max()
+        .unwrap_or(0);
+
+    let gap = 4;
+    let left_w = if ascii_w > 0 { ctx.term_width.saturating_sub(ascii_w + gap) } else { ctx.term_width };
+
+    let n = ascii_lines.len().max(sys_lines.len());
+    let mut all = Vec::new();
+
+    for i in 0..n {
+        let mut line = Vec::new();
+
+        // Left: system info (right-aligned within its block or left-aligned)
+        if i < sys_lines.len() {
+            line.extend(sys_lines[i].clone());
+            let w: usize = line.iter().map(|s| s.text.width()).sum();
+            if w < left_w {
+                line.push(StyledSpan::new(" ".repeat(left_w - w)));
+            }
+        } else if ascii_w > 0 {
+            line.push(StyledSpan::new(" ".repeat(left_w)));
+        }
+
+        // Gap + ASCII on the right
+        if i < ascii_lines.len() && ascii_w > 0 {
+            if left_w > 0 {
+                let cur: usize = line.iter().map(|s| s.text.width()).sum();
+                let target = ctx.term_width.saturating_sub(ascii_w);
+                if cur < target {
+                    line.push(StyledSpan::new(" ".repeat(target - cur)));
+                }
+            }
+            line.extend(ascii_lines[i].clone());
+        }
+
+        let w: usize = line.iter().map(|s| s.text.width()).sum();
+        if w < ctx.term_width {
+            line.push(StyledSpan::new(" ".repeat(ctx.term_width - w)));
+        }
         all.push(line);
     }
     SceneOutput { lines: all }
