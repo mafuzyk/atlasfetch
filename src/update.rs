@@ -254,6 +254,11 @@ fn update_from_release() -> Result<()> {
     if is_nix_store(&destination) {
         bail!("this halofetch is managed by Nix; update it with nix instead");
     }
+    if is_system_managed(&destination) {
+        bail!(
+            "this halofetch is managed by the system package manager; update it with the package manager instead"
+        );
+    }
 
     let archive = archive_name(&release.tag, target);
     let work = WorkDir::create(
@@ -432,6 +437,11 @@ fn is_nix_store(path: &Path) -> bool {
     path.starts_with("/nix/store")
 }
 
+/// A binary in `/usr/bin` is replaced by the system package manager, not by this command.
+fn is_system_managed(path: &Path) -> bool {
+    path.starts_with("/usr/bin")
+}
+
 /// The download directory, removed when the update ends whether or not it succeeded.
 struct WorkDir {
     path: PathBuf,
@@ -490,7 +500,7 @@ fn replace_binary(binary: &Path, destination: &Path) -> Result<()> {
 mod tests {
     use super::{
         archive_name, expected_checksum, hex, is_current, is_newer, is_nix_store, is_source_dir,
-        on_path, parse_release, Release,
+        is_system_managed, on_path, parse_release, Release,
     };
     use serde_json::json;
     use sha2::{Digest, Sha256};
@@ -696,5 +706,14 @@ mod tests {
             "/nix/store/abc-halofetch/bin/halofetch"
         )));
         assert!(!is_nix_store(Path::new("/home/me/.local/bin/halofetch")));
+    }
+
+    #[test]
+    fn system_package_paths_are_recognized() {
+        assert!(is_system_managed(Path::new("/usr/bin/halofetch")));
+        assert!(!is_system_managed(Path::new("/usr/local/bin/halofetch")));
+        assert!(!is_system_managed(Path::new(
+            "/home/me/.local/bin/halofetch"
+        )));
     }
 }
