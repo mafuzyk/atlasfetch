@@ -13,7 +13,7 @@
       in {
         packages.default = pkgs.rustPlatform.buildRustPackage {
           pname = "halofetch";
-          version = "3.1.0";
+          version = "3.1.1";
           src = ./.;
 
           cargoLock = {
