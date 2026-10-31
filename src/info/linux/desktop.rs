@@ -9,9 +9,9 @@ use std::path::PathBuf;
 use super::{read_text, sorted_dir};
 use crate::info::env_value;
 
-const SHELLS: [&str; 16] = [
+const SHELLS: [&str; 17] = [
     "bash", "zsh", "fish", "nu", "elvish", "xonsh", "dash", "ksh", "mksh", "tcsh", "csh", "sh",
-    "ion", "oil", "osh", "pwsh",
+    "ion", "oil", "osh", "pwsh", "sharky",
 ];
 
 /// Environment variables that a window manager sets when it starts, with its name.
@@ -378,6 +378,10 @@ mod tests {
             Some("fish")
         );
         assert_eq!(shell(&["sudo", "zsh", "kitty"]).as_deref(), Some("zsh"));
+        assert_eq!(
+            shell(&["sharky", "kitty", "systemd"]).as_deref(),
+            Some("sharky")
+        );
         assert!(SHELLS.contains(&"sh"));
     }
 

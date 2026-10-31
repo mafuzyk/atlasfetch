@@ -7,11 +7,29 @@ use std::fs;
 /// Upper bound on the ancestor walk, guarding against cycles and odd process trees.
 const MAX_DEPTH: usize = 64;
 
+/// Interpreters whose command name hides the script that is actually running.
+const INTERPRETERS: [&str; 8] = [
+    "ruby", "python", "python3", "node", "perl", "deno", "bun", "lua",
+];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Proc {
     pid: u32,
     ppid: u32,
     comm: String,
+    title: Option<String>,
+}
+
+impl Proc {
+    /// Name shown to the shell and terminal detectors. Interpreter-run shells
+    /// expose their real name through the process title instead of `comm`.
+    fn displayed_name(&self) -> &str {
+        if INTERPRETERS.contains(&self.comm.as_str()) {
+            self.title.as_deref().unwrap_or(&self.comm)
+        } else {
+            &self.comm
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -39,7 +57,15 @@ impl ProcTable {
                 continue;
             };
             if let Some((comm, ppid)) = parse_stat(&stat) {
-                procs.push(Proc { pid, ppid, comm });
+                let title = fs::read(entry.path().join("cmdline"))
+                    .ok()
+                    .and_then(|cmdline| process_title(&cmdline));
+                procs.push(Proc {
+                    pid,
+                    ppid,
+                    comm,
+                    title,
+                });
             }
         }
         Self::from_procs(procs)
@@ -68,7 +94,7 @@ impl ProcTable {
                 break;
             };
             let proc = &self.procs[position];
-            names.push(proc.comm.as_str());
+            names.push(proc.displayed_name());
             if proc.ppid == 0 || proc.ppid == proc.pid {
                 break;
             }
@@ -92,6 +118,17 @@ pub(super) fn count() -> Option<usize> {
 fn is_pid(name: &OsStr) -> bool {
     name.to_str()
         .is_some_and(|name| !name.is_empty() && name.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+/// First argument of `/proc/<pid>/cmdline`, trimmed and without its directory.
+///
+/// `setproctitle` rewrites this field, which is how interpreter-based shells such as
+/// sharky (a Ruby process titled `sharky`) identify themselves.
+fn process_title(cmdline: &[u8]) -> Option<String> {
+    let first = cmdline.split(|byte| *byte == 0).next()?;
+    let text = String::from_utf8_lossy(first);
+    let word = text.trim().rsplit('/').next()?.trim();
+    (!word.is_empty()).then(|| word.to_string())
 }
 
 /// Extracts the command name and parent PID from a `/proc/<pid>/stat` line.
@@ -120,6 +157,16 @@ mod tests {
             pid,
             ppid,
             comm: comm.to_string(),
+            title: None,
+        }
+    }
+
+    fn proc_with_title(pid: u32, ppid: u32, comm: &str, title: &str) -> Proc {
+        Proc {
+            pid,
+            ppid,
+            comm: comm.to_string(),
+            title: Some(title.to_string()),
         }
     }
 
@@ -171,8 +218,43 @@ mod tests {
     }
 
     #[test]
+    fn chain_uses_the_title_for_interpreter_shells() {
+        let table = ProcTable::from_procs(vec![
+            proc(1, 0, "systemd"),
+            proc(100, 1, "kitty"),
+            proc_with_title(200, 100, "ruby", "sharky"),
+        ]);
+        assert_eq!(table.chain(200), ["sharky", "kitty", "systemd"]);
+    }
+
+    #[test]
+    fn chain_keeps_the_comm_for_native_processes() {
+        let table = ProcTable::from_procs(vec![proc_with_title(
+            100,
+            1,
+            "gnome-terminal-",
+            "gnome-terminal",
+        )]);
+        assert_eq!(table.chain(100), ["gnome-terminal-"]);
+    }
+
+    #[test]
     fn comms_lists_every_process() {
         let table = ProcTable::from_procs(vec![proc(1, 0, "systemd"), proc(2, 1, "sway")]);
         assert_eq!(table.comms(), ["systemd", "sway"]);
+    }
+
+    #[test]
+    fn process_title_reads_the_renamed_first_argument() {
+        assert_eq!(process_title(b"sharky\0"), Some("sharky".to_string()));
+        assert_eq!(
+            process_title(b"sharky                 \0"),
+            Some("sharky".to_string())
+        );
+        assert_eq!(
+            process_title(b"/usr/bin/fish\0-i\0"),
+            Some("fish".to_string())
+        );
+        assert_eq!(process_title(b"\0"), None);
     }
 }
