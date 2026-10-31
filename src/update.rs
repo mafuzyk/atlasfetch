@@ -240,6 +240,14 @@ fn update_from_release() -> Result<()> {
         );
         return Ok(());
     }
+    if !is_newer(&release.tag) {
+        println!(
+            "halofetch {} is newer than the latest release {}; refusing to downgrade.",
+            env!("CARGO_PKG_VERSION"),
+            release.tag
+        );
+        return Ok(());
+    }
 
     let executable = std::env::current_exe()?;
     let destination = executable.canonicalize().unwrap_or(executable);
@@ -391,6 +399,34 @@ fn is_current(tag: &str) -> bool {
     tag.trim_start_matches('v') == env!("CARGO_PKG_VERSION")
 }
 
+/// `(major, minor, patch)` of a release tag, ignoring a leading `v` and any pre-release or
+/// build suffix (`v3.2.0-rc.1` → `(3, 2, 0)`). `None` when a component is not a number.
+fn parse_version(text: &str) -> Option<(u64, u64, u64)> {
+    let core = text.trim_start_matches('v');
+    let core = core.split(['-', '+']).next().unwrap_or(core);
+    let mut parts = core.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next().unwrap_or("0").parse().ok()?;
+    Some((major, minor, patch))
+}
+
+/// Whether the released `tag` is a newer version than the running binary.
+///
+/// `is_current` only answers "same version"; a release older than the binary has to be
+/// refused explicitly, or a locally built 3.1.0 installs the published 3.0.0 over itself.
+/// Unparseable tags answer `false`: refusing to update is recoverable, a silent downgrade
+/// is not.
+fn is_newer(tag: &str) -> bool {
+    let Some(remote) = parse_version(tag) else {
+        return false;
+    };
+    match parse_version(env!("CARGO_PKG_VERSION")) {
+        Some(current) => remote > current,
+        None => false,
+    }
+}
+
 /// A binary under the Nix store is replaced by a Nix rebuild, not by this command.
 fn is_nix_store(path: &Path) -> bool {
     path.starts_with("/nix/store")
@@ -453,8 +489,8 @@ fn replace_binary(binary: &Path, destination: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        archive_name, expected_checksum, hex, is_current, is_nix_store, is_source_dir, on_path,
-        parse_release, Release,
+        archive_name, expected_checksum, hex, is_current, is_newer, is_nix_store, is_source_dir,
+        on_path, parse_release, Release,
     };
     use serde_json::json;
     use sha2::{Digest, Sha256};
@@ -625,6 +661,33 @@ mod tests {
     fn only_the_installed_version_counts_as_current() {
         assert!(is_current(&format!("v{}", env!("CARGO_PKG_VERSION"))));
         assert!(!is_current("v0.0.1"));
+    }
+
+    #[test]
+    fn an_older_release_is_not_an_update() {
+        // The published tag can lag behind a locally built binary (main at 3.1.0 while the
+        // newest release is still v3.0.0). Installing it would be a silent downgrade.
+        let current = env!("CARGO_PKG_VERSION");
+        assert!(
+            !is_newer("v0.0.1"),
+            "{current} must not treat v0.0.1 as an update"
+        );
+        assert!(
+            !is_newer(&format!("v{current}")),
+            "the installed version is not an update to itself"
+        );
+        assert!(
+            is_newer("v99.0.0"),
+            "a higher release must still be offered"
+        );
+        assert!(
+            is_newer("v3.2.0"),
+            "a higher patch/minor must be offered even when the major matches"
+        );
+        assert!(
+            !is_newer("v3.0.0"),
+            "3.0.0 is older than 3.1.0 and must be refused"
+        );
     }
 
     #[test]
