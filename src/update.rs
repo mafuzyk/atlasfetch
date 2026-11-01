@@ -470,9 +470,15 @@ struct WorkDir {
 }
 
 impl WorkDir {
+    /// Fails on an existing path instead of reusing it: the shared temp folder lets any
+    /// user create this name first.
     fn create(path: PathBuf) -> Result<Self> {
-        let _ = std::fs::remove_dir_all(&path);
-        std::fs::create_dir_all(&path)?;
+        let mut builder = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+        builder
+            .create(&path)
+            .map_err(|error| eyre!("cannot create {}: {error}", path.display()))?;
         Ok(Self { path })
     }
 }
@@ -522,7 +528,7 @@ fn replace_binary(binary: &Path, destination: &Path) -> Result<()> {
 mod tests {
     use super::{
         archive_name, expected_checksum, hex, is_current, is_newer, is_nix_store, is_source_dir,
-        is_system_managed, on_path, parse_release, update_from_source, Release,
+        is_system_managed, on_path, parse_release, update_from_source, Release, WorkDir,
     };
     use serde_json::json;
     use sha2::{Digest, Sha256};
@@ -738,6 +744,32 @@ mod tests {
             !is_newer("v3.0.0"),
             "3.0.0 is older than 3.1.0 and must be refused"
         );
+    }
+
+    #[test]
+    fn work_dir_refuses_an_existing_directory() {
+        // In a shared temp folder that directory may belong to another user, who could
+        // swap the binary after the checksum passed.
+        let path = std::env::temp_dir().join(format!("halofetch-taken-{}", std::process::id()));
+        std::fs::create_dir_all(&path).unwrap();
+        std::fs::write(path.join("kept"), "").unwrap();
+
+        assert!(WorkDir::create(path.clone()).is_err());
+        assert!(path.join("kept").exists());
+
+        std::fs::remove_dir_all(&path).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn work_dir_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = std::env::temp_dir().join(format!("halofetch-private-{}", std::process::id()));
+        let work = WorkDir::create(path.clone()).unwrap();
+
+        let mode = std::fs::metadata(&work.path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
     }
 
     #[test]
