@@ -1,14 +1,13 @@
 # Handoff
 
-State of the v3 rewrite and the Windows port, written so work can continue from a fresh session.
+State of the project, written so work can continue from a fresh session.
 
 ## Where things are
 
-- The project was renamed from atlasfetch to halofetch. The local checkout is still `D:\atlasfetch`; the branch name is unchanged.
-- Branch: `ccr-c9f6f9fa-40obji`, open as draft PR #2 against `main` (mafuzyk/halofetch).
-- Version: 3.0.0 (`Cargo.toml`, `flake.nix`).
+- The project was renamed from atlasfetch to halofetch. Development happens on `main` (mafuzyk/halofetch).
+- Version: see `Cargo.toml`, `flake.nix` and `packaging/aur/PKGBUILD`, which move together.
 - The Rust toolchain (rustup, MSVC) is installed on the Windows machine, so the full gate runs there.
-- CI (`.github/workflows/ci.yml`) runs fmt, clippy, tests and a release build on `ubuntu-latest` and `windows-latest`. Both were green before the halofetch rename; the branch history was rewritten since, so older commit hashes no longer match.
+- CI (`.github/workflows/ci.yml`) runs fmt, clippy, tests and a release build on `ubuntu-latest` and `windows-latest`, `cargo audit`, and the Nix flake.
 - `release.yml` builds Linux binaries and `x86_64-pc-windows-msvc` as a `.zip` with a `.sha256`.
 - User-facing docs: `README.md` (English). Technical guide: `DOCS.md` (Brazilian Portuguese by project convention; keep it in pt-BR).
 
@@ -19,6 +18,10 @@ State of the v3 rewrite and the Windows port, written so work can continue from 
 - Config is version 3. v1 and v2 files are migrated automatically on load; the original is kept as `.bak`, an unreadable file is moved aside as `.invalid`.
 - Windows is the same binary with full parity, including the monitor through ConPTY.
 - JSON output (`--format json`) is `schema_version` 2 with `system` and `gauges`.
+- Colors go to a capable terminal only. `FORCE_COLOR` keeps them in a pipe; `NO_COLOR` always wins.
+- A `--config` path must exist unless the command writes it.
+- `panic = "abort"` stays off the release profile: `LiveTerminal` and `WatchTerminal` restore the terminal in `Drop`.
+- `vt100` stays on 0.15: 0.18 needs `NonZeroU16` sizes and has no advisory forcing the move.
 - The project and the binary are named `halofetch` (`halofetch.exe` on Windows). The configuration directory `atlasfetch` is moved to `halofetch` on first run, and `ATLASFETCH_SRC` is still read as a fallback for `HALOFETCH_SRC`.
 
 ## Architecture
@@ -37,7 +40,7 @@ State of the v3 rewrite and the Windows port, written so work can continue from 
 | `src/theme.rs` | Palettes, gradients, contrast. |
 | `src/tui/` | Config editor: `app.rs` state and events, `view.rs` drawing, `input.rs` text input, `clipboard.rs` (Windows only). |
 | `src/live.rs` | `monitor`: scene refreshed in place above an embedded shell (portable-pty + vt100). |
-| `src/update.rs` | Self-update from the source checkout. |
+| `src/update.rs` | Self-update from a source checkout or the latest release binary. |
 | `src/main.rs`, `src/cli.rs` | Subcommands `fetch`, `monitor`, `config`, `preset`, `logos`, `benchmark`, `update`. |
 
 The TUI is tested by feeding synthetic events to `App` and checking state and the rendered buffer; follow that pattern for new editor behavior.
@@ -51,6 +54,7 @@ cargo fmt --all -- --check
 cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo test --all-targets --all-features --locked
 cargo build --release --locked
+cargo audit
 ```
 
 From Linux, Windows code can be type-checked and cross-built (tests cannot run):

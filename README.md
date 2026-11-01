@@ -310,6 +310,8 @@ The setup editor is the recommended way to edit the file. See [DOCS.md](DOCS.md)
 
 `--scene`, `--format` and `-c, --config PATH` work before or after the command. `halofetch --help` is the authoritative reference.
 
+A `--config` file must exist, except for commands that write it (`config`, `preset apply`). Colors are written to a terminal only: a pipe or a file gets plain text, and so does `TERM=dumb` or a non-empty `NO_COLOR`. A non-empty `FORCE_COLOR` keeps them in a pipe (`FORCE_COLOR=1 halofetch | less -R`).
+
 ## Installation
 
 ### Prebuilt binaries
@@ -352,7 +354,7 @@ nix profile install github:mafuzyk/halofetch
 halofetch update
 ```
 
-`halofetch update` checks for a source checkout first through `HALOFETCH_SRC`, the current directory, the directories around the executable, or a few common paths under the home directory (`ATLASFETCH_SRC` is used when `HALOFETCH_SRC` is not set). With a checkout it refuses local changes, runs `git pull --rebase --autostash`, builds with `cargo build --release --locked` and installs to `~/.local/bin/halofetch`. Without one, or with `--release`, it asks GitHub for the latest release, downloads the archive for this platform with `curl`, checks it against the published SHA-256, extracts it with `tar` and replaces the running executable in place. It does nothing when the installed version is already the latest, and refuses a copy managed by Nix. Prebuilt binaries exist for x86_64 Linux and Windows.
+`halofetch update` checks for a source checkout first through `HALOFETCH_SRC`, the current directory, the directories around the executable, or a few common paths under the home directory (`ATLASFETCH_SRC` is used when `HALOFETCH_SRC` is not set). A checkout must be a package named `halofetch`. With one it refuses local changes, runs `git pull --rebase --autostash`, builds with `cargo build --release --locked` and installs to `~/.local/bin/halofetch`. Without one, or with `--release`, it asks GitHub for the latest release, downloads the archive for this platform with `curl`, checks it against the published SHA-256, extracts it with `tar` and replaces the running executable in place. It does nothing when the installed version is already the latest, and refuses a copy managed by Nix or installed in `/usr/bin`, with or without a checkout. Prebuilt binaries exist for x86_64 Linux and Windows.
 
 ### Start with your shell
 

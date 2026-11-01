@@ -89,7 +89,7 @@ Opções globais, aceitas antes ou depois do comando:
 
 | Opção | Efeito |
 |---|---|
-| `-c, --config CAMINHO` | Usa outro arquivo de configuração, mesmo que ele ainda não exista |
+| `-c, --config CAMINHO` | Usa outro arquivo de configuração. Ele precisa existir, exceto nos comandos que o escrevem (`config`, `preset apply` e as formas antigas `--setup`, `--reset` e `--preset`) |
 | `--format ansi\|json` | Formato da saída; `json` imprime o esquema versão 2 |
 | `--scene CENA` | Cena desta execução apenas (`classic`, `side`, `dashboard`) |
 
@@ -106,7 +106,7 @@ Formas antigas, ocultas em `--help` mas ainda aceitas:
 
 Nomes de cena aceitos, sem diferenciar maiúsculas: `classic`; `side`, com os aliases `classicfetch`, `classic-fetch`, `classic_fetch` e `fastfetch`; `dashboard`, com o alias `cockpit`. Um nome desconhecido é rejeitado com a lista das cenas válidas.
 
-Quando a saída não é um terminal, a largura vem de `COLUMNS` e, sem ela, vale 100 colunas. As cores são removidas sempre que `NO_COLOR` está definido e não vazio, em terminal ou não.
+Quando a saída não é um terminal, a largura vem de `COLUMNS` e, sem ela, vale 100 colunas. As cores só vão para um terminal: em pipe, em arquivo ou com `TERM=dumb` a saída é texto puro, e `FORCE_COLOR` não vazio as mantém. `NO_COLOR` definido e não vazio sempre as remove.
 
 ## Coleta de informações
 
@@ -589,17 +589,18 @@ As funções auxiliares puras em `info/windows/` têm testes unitários que roda
 
 Com checkout:
 
-1. localiza o checkout: `HALOFETCH_SRC` (valida; `ATLASFETCH_SRC` é aceita quando a primeira não está definida), depois o diretório atual, os ancestrais do executável (até cinco níveis) e, por último, `Projetos/halofetch`, `src/halofetch`, `halofetch`, `code/halofetch` e `dev/halofetch` dentro da home, seguidos dos mesmos nomes com `atlasfetch`. Um checkout válido tem `.git`, `Cargo.toml` e `src/main.rs`. Se nenhum candidato for válido, `find_source_dir` retorna `None`. Um `HALOFETCH_SRC` inválido é erro, sem volta silenciosa ao caminho de release;
+1. localiza o checkout: `HALOFETCH_SRC` (valida; `ATLASFETCH_SRC` é aceita quando a primeira não está definida), depois o diretório atual, os ancestrais do executável (até cinco níveis) e, por último, `Projetos/halofetch`, `src/halofetch`, `halofetch`, `code/halofetch` e `dev/halofetch` dentro da home, seguidos dos mesmos nomes com `atlasfetch`. Um checkout válido tem `.git`, `src/main.rs` e um `Cargo.toml` cujo `[package]` se chama `halofetch`. Se nenhum candidato for válido, `find_source_dir` retorna `None`. Um `HALOFETCH_SRC` inválido é erro, sem volta silenciosa ao caminho de release;
 2. recusa o checkout se `git status --porcelain` mostrar alterações;
-3. executa `git pull --rebase --autostash`, `cargo build --release --locked` e `install -m 755` para `~/.local/bin/halofetch`.
+3. recusa o executável atual se o caminho canônico estiver em `/nix/store` ou `/usr/bin`, como no caminho de release;
+4. executa `git pull --rebase --autostash`, `cargo build --release --locked` e `install -m 755` para `~/.local/bin/halofetch`.
 
 Sem checkout (ou com `--release`):
 
 1. alvo: `x86_64-unknown-linux-musl` no Linux x86_64 e `x86_64-pc-windows-msvc` no Windows x86_64. Em outros sistemas o comando para com erro, sem tentar nada;
 2. consulta `https://api.github.com/repos/mafuzyk/halofetch/releases/latest` com `curl`. Dela saem `tag_name` e os assets `halofetch-<tag>-<alvo>.tar.gz` (`.zip` no Windows) e o `.sha256` correspondente; se `curl` não puder ser executado, o comando indica que ele é necessário, e um asset ausente é erro que cita o arquivo;
 3. compara `tag_name` com `CARGO_PKG_VERSION`, ignorando o `v` inicial. Se forem iguais, imprime que a versão já é a mais recente e termina sem baixar nada;
-4. recusa o executável atual se o caminho canônico estiver em `/nix/store`, indicando que a atualização deve ser feita pelo Nix;
-5. baixa o arquivo e o `.sha256` para um diretório temporário (`halofetch-update-<pid>` no diretório temporário do sistema), que é removido ao final, com sucesso ou com erro;
+4. recusa o executável atual se o caminho canônico estiver em `/nix/store` ou `/usr/bin`, indicando que a atualização deve ser feita pelo Nix ou pelo gerenciador de pacotes;
+5. baixa o arquivo e o `.sha256`, com `curl` limitado a 15 s de conexão e 300 s no total, para um diretório temporário (`halofetch-update-<pid>` no diretório temporário do sistema). Ele é criado com permissão `0700`, a criação falha se o caminho já existir, e o diretório é removido ao final, com sucesso ou com erro;
 6. confere o SHA-256 do arquivo com `sha2`. Se a primeira palavra do `.sha256` não for um hash de 64 dígitos hexadecimais, o comando para com erro de checksum inválido; se o hash for diferente, para com erro de divergência, e nada é instalado;
 7. extrai com `tar` (`-xzf` no Linux; `-xf` no Windows, que lê zip) e exige o executável no diretório extraído;
 8. substitui o executável atual pelo canônico. No Linux, copia o novo binário para `.halofetch.new` na mesma pasta, define permissão `0755` e o renomeia sobre o original; sem permissão de escrita na pasta, o comando indica que é preciso permissão para essa pasta ou reinstalar manualmente. No Windows, renomeia o executável em uso para `halofetch.exe.old` e copia o novo, como no caminho de checkout.
