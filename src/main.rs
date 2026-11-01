@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use clap::Parser;
-use color_eyre::eyre::eyre;
+use color_eyre::eyre::{bail, eyre};
 use color_eyre::Result;
 
 use cli::{Args, Command, ConfigAction, LogosAction, OutputFormat, PresetAction};
@@ -38,11 +38,32 @@ fn main() -> Result<()> {
     let args = Args::parse();
     if let Some(path) = &args.config {
         config::set_config_path(path.clone());
+        if !path.exists() && !creates_config(&args) {
+            bail!(
+                "configuration file not found: {}\nCreate it with `halofetch --config {} config`.",
+                path.display(),
+                path.display()
+            );
+        }
     }
     match &args.command {
         Some(command) => run_command(&args, command),
         None => run_default(&args),
     }
+}
+
+/// Whether this invocation writes the file given with `--config`, so it may not exist yet.
+fn creates_config(args: &Args) -> bool {
+    args.setup
+        || args.reset
+        || args.preset.is_some()
+        || matches!(
+            args.command,
+            Some(Command::Config { .. })
+                | Some(Command::Preset {
+                    action: PresetAction::Apply { .. }
+                })
+        )
 }
 
 fn run_command(args: &Args, command: &Command) -> Result<()> {

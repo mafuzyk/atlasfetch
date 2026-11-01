@@ -52,3 +52,35 @@ fn force_color_keeps_escape_codes_in_a_pipe() {
     assert!(output.status.success());
     assert!(has_escapes(&output.stdout));
 }
+
+#[test]
+fn a_missing_explicit_config_is_an_error() {
+    let path = scratch_home("missing").join("nope.json");
+    let output = halofetch(
+        "missing",
+        &["--config", path.to_str().unwrap(), "fetch"],
+        false,
+    );
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("nope.json"));
+}
+
+#[test]
+fn an_explicit_config_can_be_created_by_a_preset() {
+    let home = scratch_home("create");
+    let path = home.join("new.json");
+    let output = halofetch(
+        "create",
+        &[
+            "--config",
+            path.to_str().unwrap(),
+            "preset",
+            "apply",
+            "dracula",
+        ],
+        false,
+    );
+    assert!(output.status.success(), "{output:?}");
+    assert!(path.exists());
+    std::fs::remove_dir_all(home).unwrap();
+}
