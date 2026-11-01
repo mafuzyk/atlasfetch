@@ -36,6 +36,17 @@ jobs:
       - name: Build release binary
         run: cargo build --release --locked
 
+  audit:
+    name: Dependency advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - name: Audit
+        run: cargo audit
+
   flake:
     name: Nix flake
     runs-on: ubuntu-latest
