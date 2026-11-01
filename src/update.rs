@@ -478,12 +478,13 @@ impl WorkDir {
     /// Fails on an existing path instead of reusing it: the shared temp folder lets any
     /// user create this name first.
     fn create(path: PathBuf) -> Result<Self> {
-        let mut builder = std::fs::DirBuilder::new();
         #[cfg(unix)]
-        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
-        builder
-            .create(&path)
-            .map_err(|error| eyre!("cannot create {}: {error}", path.display()))?;
+        let created =
+            std::os::unix::fs::DirBuilderExt::mode(&mut std::fs::DirBuilder::new(), 0o700)
+                .create(&path);
+        #[cfg(not(unix))]
+        let created = std::fs::DirBuilder::new().create(&path);
+        created.map_err(|error| eyre!("cannot create {}: {error}", path.display()))?;
         Ok(Self { path })
     }
 }
