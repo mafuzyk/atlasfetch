@@ -84,3 +84,17 @@ fn an_explicit_config_can_be_created_by_a_preset() {
     assert!(path.exists());
     std::fs::remove_dir_all(home).unwrap();
 }
+
+#[test]
+fn error_reports_are_for_users() {
+    let output = halofetch("errors", &["monitor"], false);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(
+        stderr.contains("monitor needs an interactive terminal"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("Location:"), "{stderr}");
+    assert!(!stderr.contains("RUST_BACKTRACE"), "{stderr}");
+    assert!(!has_escapes(&output.stderr), "{stderr}");
+}

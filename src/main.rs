@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use clap::Parser;
+use color_eyre::config::{HookBuilder, Theme};
 use color_eyre::eyre::{bail, eyre};
 use color_eyre::Result;
 
@@ -34,7 +35,7 @@ const DEFAULT_WIDTH: usize = 100;
 const PRESET_NAME_WIDTH: usize = 20;
 
 fn main() -> Result<()> {
-    color_eyre::install()?;
+    install_error_reports()?;
     let args = Args::parse();
     if let Some(path) = &args.config {
         config::set_config_path(path.clone());
@@ -50,6 +51,22 @@ fn main() -> Result<()> {
         Some(command) => run_command(&args, command),
         None => run_default(&args),
     }
+}
+
+/// Errors are meant for users, so they name no source location. Panics keep the
+/// standard hook, which does.
+fn install_error_reports() -> Result<()> {
+    let no_color = std::env::var_os("NO_COLOR");
+    let colored =
+        io::stderr().is_terminal() && !plain_output_for(ansi_supported(), no_color.as_deref());
+    let theme = if colored { Theme::dark() } else { Theme::new() };
+    let (_, eyre_hook) = HookBuilder::default()
+        .theme(theme)
+        .display_location_section(false)
+        .display_env_section(false)
+        .into_hooks();
+    eyre_hook.install()?;
+    Ok(())
 }
 
 /// Whether this invocation writes the file given with `--config`, so it may not exist yet.
