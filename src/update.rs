@@ -130,9 +130,21 @@ fn validate_source(path: PathBuf) -> Result<PathBuf> {
 
 fn is_source_dir(path: &Path) -> bool {
     path.join(".git").exists()
-        && path.join("Cargo.toml").exists()
         && path.join("src/main.rs").exists()
+        && std::fs::read_to_string(path.join("Cargo.toml")).is_ok_and(|text| names_package(&text))
 }
+
+/// Whether a manifest's `[package]` table is named halofetch. A `[[bin]]` of that name
+/// in another project does not count.
+fn names_package(manifest: &str) -> bool {
+    manifest
+        .lines()
+        .skip_while(|line| line.trim() != "[package]")
+        .filter_map(|line| line.split_once('='))
+        .find(|(key, _)| key.trim() == "name")
+        .is_some_and(|(_, value)| value.trim().trim_matches('"') == "halofetch")
+}
+
 
 #[cfg(not(windows))]
 fn install_path() -> Result<PathBuf> {
@@ -515,12 +527,30 @@ mod tests {
         // Built in a scratch directory: a release tarball or a Nix build has no `.git`.
         let root = std::env::temp_dir().join(format!("halofetch-source-{}", std::process::id()));
         std::fs::create_dir_all(root.join("src")).unwrap();
-        std::fs::write(root.join("Cargo.toml"), "").unwrap();
+        std::fs::write(root.join("Cargo.toml"), "[package]\nname = \"halofetch\"\n").unwrap();
         std::fs::write(root.join("src/main.rs"), "").unwrap();
         assert!(!is_source_dir(&root));
 
         std::fs::create_dir_all(root.join(".git")).unwrap();
         assert!(is_source_dir(&root));
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn another_rust_project_is_not_a_source_checkout() {
+        // Pulling and building it would run that project's `build.rs`.
+        let root = std::env::temp_dir().join(format!("halofetch-other-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::write(root.join("src/main.rs"), "").unwrap();
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"other\"\n\n[[bin]]\nname = \"halofetch\"\n",
+        )
+        .unwrap();
+
+        assert!(!is_source_dir(&root));
 
         std::fs::remove_dir_all(&root).unwrap();
     }
