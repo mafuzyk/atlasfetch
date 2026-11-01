@@ -21,13 +21,14 @@ const REPOSITORY: &str = "mafuzyk/halofetch";
 pub fn run(release: bool) -> Result<()> {
     if !release {
         if let Some(source) = find_source_dir()? {
-            return update_from_source(&source);
+            return update_from_source(&source, &running_executable()?);
         }
     }
     update_from_release()
 }
 
-fn update_from_source(source: &Path) -> Result<()> {
+fn update_from_source(source: &Path, executable: &Path) -> Result<()> {
+    refuse_managed(executable)?;
     println!("halofetch update — source: {}", source.display());
     ensure_clean_checkout(source)?;
 
@@ -145,7 +146,6 @@ fn names_package(manifest: &str) -> bool {
         .is_some_and(|(_, value)| value.trim().trim_matches('"') == "halofetch")
 }
 
-
 #[cfg(not(windows))]
 fn install_path() -> Result<PathBuf> {
     let home = std::env::var_os("HOME")
@@ -261,16 +261,8 @@ fn update_from_release() -> Result<()> {
         return Ok(());
     }
 
-    let executable = std::env::current_exe()?;
-    let destination = executable.canonicalize().unwrap_or(executable);
-    if is_nix_store(&destination) {
-        bail!("this halofetch is managed by Nix; update it with nix instead");
-    }
-    if is_system_managed(&destination) {
-        bail!(
-            "this halofetch is managed by the system package manager; update it with the package manager instead"
-        );
-    }
+    let destination = running_executable()?;
+    refuse_managed(&destination)?;
 
     let archive = archive_name(&release.tag, target);
     let work = WorkDir::create(
@@ -323,6 +315,24 @@ fn update_from_release() -> Result<()> {
 
     println!("→ Installed {} to {}", release.tag, destination.display());
     Ok(())
+}
+
+fn refuse_managed(executable: &Path) -> Result<()> {
+    if is_nix_store(executable) {
+        bail!("this halofetch is managed by Nix; update it with nix instead");
+    }
+    if is_system_managed(executable) {
+        bail!(
+            "this halofetch is managed by the system package manager; update it with the package manager instead"
+        );
+    }
+    Ok(())
+}
+
+/// The path of this binary with links resolved.
+fn running_executable() -> Result<PathBuf> {
+    let executable = std::env::current_exe()?;
+    Ok(executable.canonicalize().unwrap_or(executable))
 }
 
 /// The release target triple for this platform, when a binary is published for it.
@@ -512,7 +522,7 @@ fn replace_binary(binary: &Path, destination: &Path) -> Result<()> {
 mod tests {
     use super::{
         archive_name, expected_checksum, hex, is_current, is_newer, is_nix_store, is_source_dir,
-        is_system_managed, on_path, parse_release, Release,
+        is_system_managed, on_path, parse_release, update_from_source, Release,
     };
     use serde_json::json;
     use sha2::{Digest, Sha256};
@@ -728,6 +738,18 @@ mod tests {
             !is_newer("v3.0.0"),
             "3.0.0 is older than 3.1.0 and must be refused"
         );
+    }
+
+    #[test]
+    fn source_update_refuses_a_managed_binary() {
+        // It would install a second copy in ~/.local/bin and leave the managed one in place.
+        let source = Path::new("/nonexistent");
+        let system = update_from_source(source, Path::new("/usr/bin/halofetch")).unwrap_err();
+        assert!(system.to_string().contains("package manager"));
+
+        let nix = update_from_source(source, Path::new("/nix/store/a-halofetch/bin/halofetch"))
+            .unwrap_err();
+        assert!(nix.to_string().contains("managed by Nix"));
     }
 
     #[test]
