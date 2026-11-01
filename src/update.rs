@@ -273,15 +273,15 @@ fn update_from_release() -> Result<()> {
 
     println!("→ Downloading {}...", release.tag);
     run_command(
-        Command::new("curl")
-            .args(["-fsSL", "-o"])
+        curl()
+            .arg("-o")
             .arg(&archive_path)
             .arg(&release.archive_url),
         &format!("download {archive}"),
     )?;
     run_command(
-        Command::new("curl")
-            .args(["-fsSL", "-o"])
+        curl()
+            .arg("-o")
             .arg(&checksum_path)
             .arg(&release.checksum_url),
         "download checksum",
@@ -355,11 +355,16 @@ fn archive_name(tag: &str, target: &str) -> String {
     format!("halofetch-{tag}-{target}.{extension}")
 }
 
+fn curl() -> Command {
+    let mut command = Command::new("curl");
+    command.args(["-fsSL", "--connect-timeout", "15", "--max-time", "300"]);
+    command
+}
+
 fn latest_release_json() -> Result<String> {
     let url = format!("https://api.github.com/repos/{REPOSITORY}/releases/latest");
-    let output = Command::new("curl")
+    let output = curl()
         .args([
-            "-fsSL",
             "-H",
             "Accept: application/vnd.github+json",
             "-H",
@@ -527,8 +532,9 @@ fn replace_binary(binary: &Path, destination: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        archive_name, expected_checksum, hex, is_current, is_newer, is_nix_store, is_source_dir,
-        is_system_managed, on_path, parse_release, update_from_source, Release, WorkDir,
+        archive_name, curl, expected_checksum, hex, is_current, is_newer, is_nix_store,
+        is_source_dir, is_system_managed, on_path, parse_release, update_from_source, Release,
+        WorkDir,
     };
     use serde_json::json;
     use sha2::{Digest, Sha256};
@@ -744,6 +750,14 @@ mod tests {
             !is_newer("v3.0.0"),
             "3.0.0 is older than 3.1.0 and must be refused"
         );
+    }
+
+    #[test]
+    fn downloads_cannot_hang_forever() {
+        let command = curl();
+        let args: Vec<_> = command.get_args().collect();
+        assert!(args.iter().any(|arg| *arg == "--connect-timeout"));
+        assert!(args.iter().any(|arg| *arg == "--max-time"));
     }
 
     #[test]
