@@ -204,10 +204,25 @@ fn static_width() -> usize {
         .unwrap_or(DEFAULT_WIDTH)
 }
 
-/// Plain text where the console cannot show ANSI escapes, and wherever `NO_COLOR` is set to
-/// a non-empty value, terminal or not.
+/// Plain text outside a capable terminal, where the console cannot show ANSI escapes, and
+/// wherever `NO_COLOR` is set to a non-empty value, terminal or not.
 fn plain_output() -> bool {
-    plain_output_for(ansi_supported(), std::env::var_os("NO_COLOR").as_deref())
+    !colors_wanted() || plain_output_for(ansi_supported(), std::env::var_os("NO_COLOR").as_deref())
+}
+
+/// Whether stdout should carry escapes before `NO_COLOR` is considered. A non-empty
+/// `FORCE_COLOR` keeps them for pipes such as `halofetch | less -R`.
+fn color_target(terminal: bool, term: Option<&OsStr>, force_color: Option<&OsStr>) -> bool {
+    force_color.is_some_and(|value| !value.is_empty())
+        || (terminal && term != Some(OsStr::new("dumb")))
+}
+
+fn colors_wanted() -> bool {
+    color_target(
+        io::stdout().is_terminal(),
+        std::env::var_os("TERM").as_deref(),
+        std::env::var_os("FORCE_COLOR").as_deref(),
+    )
 }
 
 /// The plain-text rule. Pure, so it is tested without changing the environment.
@@ -314,13 +329,14 @@ fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
 
 fn list_presets() -> Result<()> {
     let cfg = Config::load()?;
+    let colored = ansi_supported() && colors_wanted();
     let mut out = String::from("Available presets:\n");
     for preset in theme::all_themes() {
         writeln!(
             out,
             "  {}  {}",
             padded(preset.name, PRESET_NAME_WIDTH),
-            swatch(&preset.colors)
+            swatch(&preset.colors, colored)
         )?;
     }
     if !cfg.custom_palettes.is_empty() {
@@ -330,7 +346,7 @@ fn list_presets() -> Result<()> {
                 out,
                 "  {}  {}",
                 padded(name, PRESET_NAME_WIDTH),
-                swatch(colors)
+                swatch(colors, colored)
             )?;
         }
     }
@@ -338,14 +354,14 @@ fn list_presets() -> Result<()> {
 }
 
 /// One block of color per palette entry, drawn with the shared canvas.
-fn swatch(colors: &[Color]) -> String {
+fn swatch(colors: &[Color], colored: bool) -> String {
     let spans = colors
         .iter()
         .map(|&color| Span::new("  ", Style::new().bg(color)))
         .collect();
     let line = Line::from_spans(spans);
     // The colors are the content here, so `NO_COLOR` does not blank them.
-    let text = if ansi_supported() {
+    let text = if colored {
         render::to_ansi(&[line])
     } else {
         render::to_plain(&[line])
@@ -432,7 +448,7 @@ mod tests {
     #[test]
     fn swatch_has_one_block_per_color() {
         let colors = [Color::new(1, 2, 3), Color::new(4, 5, 6)];
-        let text = swatch(&colors);
+        let text = swatch(&colors, true);
         assert!(text.contains("\x1b[48;2;1;2;3m"));
         assert!(text.contains("\x1b[48;2;4;5;6m"));
         assert!(!text.ends_with('\n'));
@@ -453,5 +469,19 @@ mod tests {
     fn consoles_without_ansi_are_always_plain() {
         assert!(plain_output_for(false, None));
         assert!(plain_output_for(false, Some(OsStr::new(""))));
+    }
+
+    #[test]
+    fn only_a_capable_terminal_gets_colors() {
+        assert!(color_target(true, Some(OsStr::new("xterm")), None));
+        assert!(color_target(true, None, None));
+        assert!(!color_target(false, Some(OsStr::new("xterm")), None));
+        assert!(!color_target(true, Some(OsStr::new("dumb")), None));
+    }
+
+    #[test]
+    fn force_color_keeps_colors_outside_a_terminal() {
+        assert!(color_target(false, None, Some(OsStr::new("1"))));
+        assert!(!color_target(false, None, Some(OsStr::new(""))));
     }
 }
