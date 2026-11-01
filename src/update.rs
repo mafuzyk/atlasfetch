@@ -744,7 +744,7 @@ mod tests {
             "a higher release must still be offered"
         );
         assert!(
-            is_newer("v3.2.0"),
+            is_newer("v3.99.0"),
             "a higher patch/minor must be offered even when the major matches"
         );
         assert!(
